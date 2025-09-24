@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { createDatabase } from './db'
 import { CloudflareBindings, ContextVariables } from './types/env'
-
+import { getDb } from './middleware/database'
 // Import middleware
 import { corsMiddleware, securityHeaders, apiSecurityHeaders, requestLogger, errorHandler, notFoundHandler, healthCheck } from './middleware/security'
 import { generalLimiter, ipLimiter } from './middleware/rateLimiting'
@@ -20,17 +20,7 @@ app.use('*', apiSecurityHeaders)
 app.use('*', generalLimiter)
 
 // Database connection middleware
-app.use('*', async (c, next) => {
-  // Only create database connection when env vars are available
-  if (c.env.TURSO_DATABASE_URL && c.env.TURSO_AUTH_TOKEN) {
-    const db = createDatabase({
-      TURSO_DATABASE_URL: c.env.TURSO_DATABASE_URL,
-      TURSO_AUTH_TOKEN: c.env.TURSO_AUTH_TOKEN
-    })
-    c.set('db', db)
-  }
-  await next()
-})
+app.use('*', getDb())
 
 // Health check endpoint
 app.get('/health', healthCheck)
