@@ -11,6 +11,8 @@ export const getDb = (): MiddlewareHandler => {
                 url: ctx.env.TURSO_DATABASE_URL,
                 authToken: ctx.env.TURSO_AUTH_TOKEN,
               })
+
+            console.log('Creating database connection', `${ctx.env.TURSO_DATABASE_URL} ${ctx.env.TURSO_AUTH_TOKEN}`)
             ctx.set('db', drizzle(client, { schema }));
         }
 
