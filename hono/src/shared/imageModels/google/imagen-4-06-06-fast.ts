@@ -8,6 +8,13 @@ class Imagen4Fast0606 {
     this.data = {
       id: 'google/imagen-4-fast-06-06',
       providers: [{
+        id: 'geminiImagen',
+        model_name: 'gemini-2.0-flash-exp',
+        pricing: {
+          type: PRICING_TYPES.FIXED,
+          value: 0.02,
+        }
+      }, {
         id: 'vertex',
         model_name: 'imagen-4.0-fast-generate-preview-06-06',
         pricing: {

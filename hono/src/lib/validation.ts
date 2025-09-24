@@ -81,7 +81,8 @@ export const ImageGenerationResponseSchema = z.object({
     url: z.string().optional(),
     b64_json: z.string().optional(),
     revised_prompt: z.string().optional()
-  }))
+  })),
+  cost: z.number().optional()
 })
 
 export const VideoGenerationResponseSchema = z.object({
@@ -90,7 +91,8 @@ export const VideoGenerationResponseSchema = z.object({
     url: z.string().optional(),
     b64_json: z.string().optional(),
     revised_prompt: z.string().optional()
-  }))
+  })),
+  cost: z.number().optional()
 })
 
 // Type exports

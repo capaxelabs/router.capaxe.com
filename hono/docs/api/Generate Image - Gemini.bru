@@ -12,13 +12,21 @@ post {
 
 body:json {
   {
-    "model": "google/gemini-2.0-flash-exp",
+    "model": "google/gemini-2.5-flash",
     "prompt": "A beautiful sunset over mountains, digital art style, high quality, vibrant colors",
     "n": 1,
     "size": "1024x1024",
     "quality": "high",
     "response_format": "url"
   }
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
 }
 
 docs {
@@ -36,12 +44,4 @@ docs {
   Returns:
   - created: Unix timestamp
   - data: Array of generated images with URLs or base64 data
-}
-
-tests {
-  test("Status should be 200 or contain error details", function() {
-    if (res.getStatus() !== 200) {
-      expect(res.getBody().error).to.be.an('object');
-    }
-  });
 }

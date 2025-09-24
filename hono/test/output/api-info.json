@@ -1,0 +1,7 @@
+{
+  "name": "ImageRouter API",
+  "version": "1.0.0",
+  "description": "A unified API for image and video generation models",
+  "framework": "Hono + Cloudflare Workers",
+  "docs": "https://docs.imagerouter.capaxe.com"
+}

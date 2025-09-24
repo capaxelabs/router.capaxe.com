@@ -60,6 +60,9 @@ app.get('/', (c) => {
 import modelsRoutes from './routes/models'
 import imageRoutes from './routes/images'
 import videoRoutes from './routes/videos'
+import adminRoutes from './routes/admin'
+import taskRoutes from './routes/tasks'
+import tasksPage from './routes/tasksPage'
 
 // Models listing endpoint (Google models only for Phase 2)
 app.route('/v1/models', modelsRoutes)
@@ -73,6 +76,15 @@ app.route('/v1/openai/images', imageRoutes)
 // Video generation routes
 app.route('/v1/openai/videos', videoRoutes)
 
+// Task management routes for async processing
+app.route('/v1/tasks', taskRoutes)
+
+// Tasks web page for viewing all tasks
+app.route('/tasks', tasksPage)
+
+// Admin routes for database seeding and management
+app.route('/admin', adminRoutes)
+
 // Placeholder routes for Phase 3 (Bytedance models) and authentication
 // These will be implemented in the next phases
 
@@ -81,4 +93,13 @@ app.route('/v1/openai/videos', videoRoutes)
 // Handle 404s
 app.notFound(notFoundHandler)
 
-export default app
+// Export the main app and queue consumer
+export default {
+  fetch: app.fetch,
+  
+  // Queue consumer for async processing
+  async queue(batch: any, env: CloudflareBindings): Promise<void> {
+    const { consumeQueue } = await import('./services/queueConsumer')
+    return consumeQueue(batch, env)
+  }
+}

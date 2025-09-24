@@ -6,6 +6,8 @@ export interface CloudflareBindings {
   
   // Storage
   STORAGE_BUCKET: R2Bucket
+  R2_BUCKET_NAME: string
+  R2_CUSTOM_PUBLIC_URL: string
   
   // Google Cloud
   GOOGLE_CLOUD_PROJECT_ID: string
@@ -26,6 +28,9 @@ export interface CloudflareBindings {
   
   // Rate limiting
   RATE_LIMIT_REDIS?: KVNamespace
+  
+  // Async processing
+  ASYNC_QUEUE: Queue
 }
 
 // Context variables for file uploads and parsing
@@ -38,4 +43,11 @@ export interface ContextVariables {
   }
   db?: any
   secureHeadersNonce?: string
+  authenticatedUser?: {
+    id: string
+    apiKeyId: string | null
+    isActive: boolean
+    credits: number
+    isTemporaryJwt: boolean
+  }
 }

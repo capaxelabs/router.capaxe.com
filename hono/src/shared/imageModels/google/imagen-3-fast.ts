@@ -8,6 +8,13 @@ class Imagen3Fast {
     this.data = {
       id: 'google/imagen-3-fast',
       providers: [{
+        id: 'geminiImagen',
+        model_name: 'gemini-2.0-flash-exp',
+        pricing: {
+          type: PRICING_TYPES.FIXED,
+          value: 0.02,
+        }
+      }, {
         id: 'vertex',
         model_name: 'imagen-3.0-fast-generate-001',
         pricing: {

@@ -1,0 +1,145 @@
+{
+  "summary": {
+    "passed": 6,
+    "failed": 15,
+    "total": 21,
+    "successRate": "28.6%",
+    "totalTime": 472,
+    "timestamp": "2025-09-24T19:01:49.622Z"
+  },
+  "tests": [
+    {
+      "name": "Health Check",
+      "status": "PASS",
+      "message": "Server is healthy",
+      "duration": 29
+    },
+    {
+      "name": "API Info",
+      "status": "PASS",
+      "message": "Version: 1.0.0",
+      "duration": 2
+    },
+    {
+      "name": "Models Listing",
+      "status": "FAIL",
+      "message": "Status: 200",
+      "duration": 2
+    },
+    {
+      "name": "Authentication - No Key",
+      "status": "PASS",
+      "message": "Properly rejected request without API key",
+      "duration": 0
+    },
+    {
+      "name": "Authentication - Invalid Key",
+      "status": "PASS",
+      "message": "Properly rejected invalid API key",
+      "duration": 0
+    },
+    {
+      "name": "Error Handling",
+      "status": "PASS",
+      "message": "Proper error response: Model 'invalid/model' not found",
+      "duration": 0
+    },
+    {
+      "name": "Rate Limiting",
+      "status": "PASS",
+      "message": "5 successful, 0 rate limited",
+      "duration": 0
+    },
+    {
+      "name": "Text-to-Image",
+      "status": "FAIL",
+      "message": "Status: 500, Error: Failed to log usage and deduct credits",
+      "duration": 49
+    },
+    {
+      "name": "Text-to-Image (Base64)",
+      "status": "FAIL",
+      "message": "Status: 500, Error: Failed to log usage and deduct credits",
+      "duration": 40
+    },
+    {
+      "name": "Image-to-Image",
+      "status": "FAIL",
+      "message": "Status: 500, Error: undefined",
+      "duration": 15
+    },
+    {
+      "name": "Text-to-Video",
+      "status": "FAIL",
+      "message": "Status: 429, Error: Too many requests, please try again later.",
+      "duration": 3
+    },
+    {
+      "name": "Image-to-Video",
+      "status": "FAIL",
+      "message": "Status: 429, Error: Too many requests, please try again later.",
+      "duration": 1
+    },
+    {
+      "name": "Video Proxy Validation",
+      "status": "FAIL",
+      "message": "Unexpected response: 429",
+      "duration": 2
+    },
+    {
+      "name": "R2 Storage Integration",
+      "status": "FAIL",
+      "message": "Failed to generate image: 429",
+      "duration": 3
+    },
+    {
+      "name": "Async Image Generation - Create Task",
+      "status": "FAIL",
+      "message": "Status: 429, Error: Too many requests, please try again later.",
+      "duration": 0
+    },
+    {
+      "name": "Async Video Generation - Create Task",
+      "status": "FAIL",
+      "message": "Status: 429",
+      "duration": 0
+    },
+    {
+      "name": "Task Status - Invalid ID",
+      "status": "FAIL",
+      "message": "Expected 400, got 429",
+      "duration": 0
+    },
+    {
+      "name": "Task Status - Not Found",
+      "status": "FAIL",
+      "message": "Expected 404, got 429",
+      "duration": 0
+    },
+    {
+      "name": "Task Management - List Tasks",
+      "status": "FAIL",
+      "message": "Status: 429",
+      "duration": 0
+    },
+    {
+      "name": "Task Management - Stats",
+      "status": "FAIL",
+      "message": "Status: 429",
+      "duration": 0
+    },
+    {
+      "name": "Task Management - Filter by Status",
+      "status": "FAIL",
+      "message": "Status: 429",
+      "duration": 0
+    }
+  ],
+  "config": {
+    "baseUrl": "http://localhost:8787",
+    "apiKey": "test-api-key-1234567890abcdef1234567890abcdef1234567890abcdef123",
+    "testImagePath": "/Users/mukesh/Projects/live/imagerouter.capaxe.com/hono/test/fixtures/test-image.png",
+    "outputDir": "/Users/mukesh/Projects/live/imagerouter.capaxe.com/hono/test/output",
+    "timeout": 30000
+  }
+}

@@ -41,10 +41,22 @@ export const apiUsage = sqliteTable('api_usage', {
   outputUrls: text('output_urls').default('[]').notNull(), // JSON array string
   apiKeyId: text('api_key_id').references(() => apiKeys.id),
   userId: text('user_id').references(() => users.id).notNull(),
+  
+  // Async task fields
+  taskId: text('task_id'), // Links to async task
+  taskStatus: text('task_status', { 
+    enum: ['sync', 'pending', 'processing', 'completed', 'failed'] 
+  }).default('sync').notNull(),
+  taskProgress: integer('task_progress').default(0), // 0-100
+  taskStartedAt: integer('task_started_at', { mode: 'timestamp' }),
+  taskCompletedAt: integer('task_completed_at', { mode: 'timestamp' }),
+  isAsync: integer('is_async', { mode: 'boolean' }).default(false).notNull(),
 }, (table) => ({
   apiKeyIdIdx: index('api_usage_api_key_id_idx').on(table.apiKeyId),
   createdAtIdx: index('api_usage_created_at_idx').on(table.createdAt),
   userIdIdx: index('api_usage_user_id_idx').on(table.userId),
+  taskIdIdx: index('api_usage_task_id_idx').on(table.taskId), // New index for async tasks
+  taskStatusIdx: index('api_usage_task_status_idx').on(table.taskStatus), // New index for status queries
 }))
 
 // Type exports for use in the application

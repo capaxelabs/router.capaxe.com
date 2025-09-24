@@ -7,7 +7,9 @@
     "nodejs_compat"
   ],
   "vars": {
-    "ENVIRONMENT": "development"
+    "ENVIRONMENT": "development",
+    "R2_BUCKET_NAME": "imagerouter",
+    "R2_CUSTOM_PUBLIC_URL": "https://81cac75fe318d80f4344481afc4799ac.r2.cloudflarestorage.com"
   },
   "r2_buckets": [
     {
@@ -16,6 +18,23 @@
       "preview_bucket_name": "imagerouter-preview"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "ASYNC_QUEUE",
+        "queue": "imagerouter-async-tasks"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "imagerouter-async-tasks",
+        "max_batch_size": 1,
+        "max_batch_timeout": 30,
+        "max_retries": 3,
+        "dead_letter_queue": "imagerouter-failed-tasks"
+      }
+    ]
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

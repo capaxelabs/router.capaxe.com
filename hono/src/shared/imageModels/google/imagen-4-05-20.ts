@@ -8,6 +8,13 @@ class Imagen40520 {
     this.data = {
       id: 'google/imagen-4-05-20',
       providers: [{
+        id: 'geminiImagen',
+        model_name: 'gemini-2.0-flash-exp',
+        pricing: {
+          type: PRICING_TYPES.FIXED,
+          value: 0.04,
+        }
+      }, {
         id: 'vertex',
         model_name: 'imagen-4.0-generate-preview-05-20',
         pricing: {

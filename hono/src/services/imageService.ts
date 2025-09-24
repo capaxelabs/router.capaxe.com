@@ -3,7 +3,7 @@ import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleImageModels } from '../shared/imageModels/google'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
-import { R2StorageService } from '../lib/storage'
+import { createStorageService } from '../lib/storage'
 import { extractWidthHeight } from '../lib/imageHelpers'
 import { ImageGenerationRequest, ImageGenerationResponse } from '../lib/validation'
 
@@ -94,8 +94,15 @@ export async function generateImage(
 
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
-    const storageService = new R2StorageService(c.env.STORAGE_BUCKET)
-    result = await processImageResult(result, storageService, userId, params.response_format || 'url')
+    const storageService = createStorageService(
+      c.env.STORAGE_BUCKET,
+      c.env.R2_BUCKET_NAME,
+      c.env.R2_CUSTOM_PUBLIC_URL
+    )
+    
+    if (storageService) {
+      result = await processImageResult(result, storageService, userId, params.response_format || 'url')
+    }
   }
 
   return result
@@ -338,43 +345,10 @@ async function generateOpenRouter(
  */
 async function processImageResult(
   result: GenerationResult,
-  storageService: R2StorageService,
+  storageService: any,
   userId: string,
   responseFormat: 'url' | 'b64_json'
 ): Promise<GenerationResult> {
-  if (responseFormat === 'b64_json') {
-    return result // Return as-is for base64 format
-  }
-
-  // Convert base64 images to URLs via storage
-  const processedData = await Promise.all(
-    result.data.map(async (item, index) => {
-      if (item.b64_json) {
-        try {
-          const imageBuffer = Uint8Array.from(atob(item.b64_json), c => c.charCodeAt(0))
-          const key = storageService.generateKey(`image_${Date.now()}_${index}.png`, userId)
-          const url = await storageService.uploadFile(key, imageBuffer.buffer, {
-            contentType: 'image/png'
-          })
-          
-          return {
-            url: url,
-            revised_prompt: item.revised_prompt
-          }
-        } catch (error) {
-          console.error('Failed to upload image to storage:', error)
-          return {
-            b64_json: item.b64_json,
-            revised_prompt: item.revised_prompt
-          }
-        }
-      }
-      return item
-    })
-  )
-
-  return {
-    ...result,
-    data: processedData
-  }
+  // Use the Express-style storage service methods
+  return await storageService.processImageResult(result, userId, responseFormat, userId)
 }

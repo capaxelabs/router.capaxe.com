@@ -1,19 +1,25 @@
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import { CloudflareBindings, ContextVariables } from '../types/env'
-import { generateVideo } from '../services/videoService'
+import { createVideoGenerationHandler } from '../services/generationWrapper'
 import { ipLimiter } from '../middleware/rateLimiting'
+import { validateApiKey } from '../middleware/apiKeyMiddleware'
 import { parseMultipartFormData, combineFieldsAndFiles } from '../middleware/uploadMiddleware'
 import { VideoGenerationRequest, VideoGenerationResponse, validateVideoRequest } from '../lib/validation'
+import { createQueueService } from '../services/queueService'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
+// Create the generation handler with usage logging
+const videoGenerationHandler = createVideoGenerationHandler()
+
 /**
  * POST /v1/openai/videos/generations
- * Generate videos using Google models
+ * Generate videos using Google models with usage logging
  */
 app.post('/generations',
   ipLimiter,
+  validateApiKey,
   // Parse multipart form data if present
   async (c, next) => {
     if (c.req.header('content-type')?.includes('multipart/form-data')) {
@@ -41,6 +47,10 @@ app.post('/generations',
     try {
       const validatedData = c.req.valid('json') as VideoGenerationRequest
       const parsedFiles = c.get('parsedFiles')
+      const authenticatedUser = c.get('authenticatedUser')
+      
+      // Check if async mode is requested
+      const isAsync = c.req.query('async') === 'true'
       
       // Create request with potential file data
       const requestData: any = { ...validatedData }
@@ -60,25 +70,65 @@ app.post('/generations',
         requestData.files = parsedFiles
       }
 
-      // For now, use a mock user ID since authentication is not fully implemented
-      const userId = 'mock-user-id'
+      if (isAsync) {
+        // ASYNC MODE: Create task and return immediately
+        try {
+          const queueService = createQueueService(c)
+          const { taskId } = await queueService.createAsyncTask('video', authenticatedUser!.id, {
+            model: validatedData.model,
+            prompt: validatedData.prompt,
+            imageSize: validatedData.size,
+            quality: 'auto', // Videos don't have quality parameter typically
+            apiKeyId: authenticatedUser!.apiKeyId,
+            ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
+            ...requestData // Include all request data
+          })
 
-      const result = await generateVideo(c, requestData, userId)
+          return c.json({
+            taskId,
+            status: 'pending',
+            type: 'video',
+            createdAt: Date.now(),
+            message: 'Video generation task created. Use GET /v1/tasks/:taskId to check status.',
+            estimatedCompletionTime: Date.now() + 60000 // 60 seconds estimate
+          })
 
-      // Return in OpenAI-compatible format
-      const response: VideoGenerationResponse = {
-        created: result.created,
-        data: result.data.map(item => ({
-          url: item.url,
-          b64_json: item.b64_json,
-          revised_prompt: item.revised_prompt || undefined
-        }))
+        } catch (queueError) {
+          console.error('Failed to create async video task:', queueError)
+          return c.json({
+            error: {
+              message: 'Failed to create async video task. Please try synchronous generation or try again.',
+              type: 'async_creation_error'
+            }
+          }, 500)
+        }
+        
+      } else {
+        // SYNC MODE: Process immediately (existing behavior)
+        const result = await videoGenerationHandler(c, requestData)
+
+        // Return in OpenAI-compatible format
+        const response: VideoGenerationResponse = {
+          created: result.created,
+          data: result.data.map(item => ({
+            url: item.url,
+            b64_json: item.b64_json,
+            revised_prompt: item.revised_prompt || undefined
+          })),
+          cost: result.cost
+        }
+
+        return c.json(response)
       }
-
-      return c.json(response)
 
     } catch (error: unknown) {
       console.error('Video generation error:', error)
+
+      // Handle formatted errors from generation wrapper
+      if ((error as any)?.errorResponse) {
+        const formattedError = (error as any)
+        return c.json(formattedError.errorResponse, formattedError.status)
+      }
 
       // Try to parse structured error from service
       let errorResponse
