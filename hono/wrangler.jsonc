@@ -12,16 +12,8 @@
   "r2_buckets": [
     {
       "binding": "STORAGE_BUCKET",
-      "bucket_name": "imagerouter-storage",
-      "preview_bucket_name": "imagerouter-storage-preview"
-    }
-  ],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "imagerouter-db",
-      "database_id": "",
-      "preview_database_id": ""
+      "bucket_name": "imagerouter",
+      "preview_bucket_name": "imagerouter-preview"
     }
   ],
   "observability": {
