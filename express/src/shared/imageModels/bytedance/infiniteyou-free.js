@@ -1,4 +1,4 @@
-import InfiniteYou from '../bytedance/infiniteyou.js'
+import InfiniteYou from './infiniteyou.js'
 
 class InfiniteYouFree extends InfiniteYou {
   constructor(...args) {

@@ -1,4 +1,4 @@
-import Chroma from '../lodestones/chroma.js'
+import Chroma from './chroma.js'
 
 class ChromaFree extends Chroma {
   constructor(...args) {

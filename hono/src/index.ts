@@ -1,0 +1,84 @@
+import { Hono } from 'hono'
+import { createDatabase } from './db'
+import { CloudflareBindings } from './types/env'
+
+// Import middleware
+import { corsMiddleware, securityHeaders, apiSecurityHeaders, requestLogger, errorHandler, notFoundHandler, healthCheck } from './middleware/security'
+import { generalLimiter, ipLimiter } from './middleware/rateLimiting'
+
+// Create Hono app with proper typing
+const app = new Hono<{ Bindings: CloudflareBindings }>()
+
+// Global middleware setup
+app.use('*', requestLogger)
+app.use('*', errorHandler)
+app.use('*', corsMiddleware)
+app.use('*', securityHeaders)
+app.use('*', apiSecurityHeaders)
+
+// Apply general rate limiting to all routes
+app.use('*', generalLimiter)
+
+// Database connection middleware
+app.use('*', async (c, next) => {
+  // Only create database connection when env vars are available
+  if (c.env.TURSO_DATABASE_URL && c.env.TURSO_AUTH_TOKEN) {
+    const db = createDatabase({
+      TURSO_DATABASE_URL: c.env.TURSO_DATABASE_URL,
+      TURSO_AUTH_TOKEN: c.env.TURSO_AUTH_TOKEN
+    })
+    c.set('db', db)
+  }
+  await next()
+})
+
+// Health check endpoint
+app.get('/health', healthCheck)
+
+// IP debug endpoint
+app.get('/ip', (c) => {
+  const proxyCount = Number(c.env.PROXY_COUNT || 0)
+  const clientIp = proxyCount > 0 
+    ? c.req.header('cf-connecting-ip') 
+    : c.req.header('x-forwarded-for') || 'unknown'
+  
+  return c.json({ ip: clientIp })
+})
+
+// API version info
+app.get('/', (c) => {
+  return c.json({
+    name: 'ImageRouter API',
+    version: '2.0.0',
+    description: 'A unified API for image and video generation models',
+    framework: 'Hono + Cloudflare Workers',
+    docs: 'https://docs.imagerouter.io'
+  })
+})
+
+// Import routes
+import modelsRoutes from './routes/models'
+import imageRoutes from './routes/images'
+import videoRoutes from './routes/videos'
+
+// Models listing endpoint (Google models only for Phase 2)
+app.route('/v1/models', modelsRoutes)
+
+// Models HTML page at /models
+app.route('/models', modelsRoutes)
+
+// Image generation routes
+app.route('/v1/openai/images', imageRoutes)
+
+// Video generation routes
+app.route('/v1/openai/videos', videoRoutes)
+
+// Placeholder routes for Phase 3 (Bytedance models) and authentication
+// These will be implemented in the next phases
+
+// app.route('/v1/auth', authRoutes)
+
+// Handle 404s
+app.notFound(notFoundHandler)
+
+export default app
