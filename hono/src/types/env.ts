@@ -27,3 +27,15 @@ export interface CloudflareBindings {
   // Rate limiting
   RATE_LIMIT_REDIS?: KVNamespace
 }
+
+// Context variables for file uploads and parsing
+export interface ContextVariables {
+  parsedFields?: Record<string, string>
+  parsedFiles?: {
+    image?: File[]
+    mask?: File[]
+    [key: string]: File[] | undefined
+  }
+  db?: any
+  secureHeadersNonce?: string
+}

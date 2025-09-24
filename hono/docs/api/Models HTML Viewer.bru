@@ -1,0 +1,35 @@
+meta {
+  name: Models HTML Viewer
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{APP_URL}}/models/ui
+  body: none
+  auth: none
+}
+
+docs {
+  Interactive HTML page for viewing all available models.
+  
+  Features:
+  - Sortable table with model details
+  - Search functionality
+  - Filter by model type (image/video)
+  - Filter by provider
+  - Responsive design
+  - jQuery-powered interactions
+  
+  Access this in your browser for a user-friendly way to explore available models.
+}
+
+tests {
+  test("Status should be 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Content-Type should be text/html", function() {
+    expect(res.getHeaders()['content-type']).to.contain('text/html');
+  });
+}

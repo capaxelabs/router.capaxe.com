@@ -1,0 +1,52 @@
+meta {
+  name: Generate Video - Veo
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/videos/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/veo-3-fast",
+    "prompt": "A serene lake with mountains in the background, gentle waves on the water, golden hour lighting, cinematic quality",
+    "duration": 5,
+    "fps": 24,
+    "size": "1280x720",
+    "response_format": "url"
+  }
+}
+
+docs {
+  Generate videos using Google Veo models.
+  
+  Available Veo models:
+  - google/veo-2: Standard quality video generation
+  - google/veo-3: Higher quality, latest generation
+  - google/veo-3-fast: Optimized for faster generation
+  
+  Parameters:
+  - model: Google video model ID
+  - prompt: Text description of the video to generate
+  - duration: Video length in seconds (1-10, default: 5)
+  - fps: Frames per second (12-60, default: 24)
+  - size: Video dimensions (default: "auto")
+  - quality: Video quality ("auto", "low", "medium", "high")
+  - response_format: Response format ("url" or "b64_json", default: "url")
+  
+  Returns:
+  - created: Unix timestamp
+  - data: Array of generated videos with URLs or base64 data
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+}

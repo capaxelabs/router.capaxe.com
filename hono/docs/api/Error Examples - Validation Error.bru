@@ -1,0 +1,49 @@
+meta {
+  name: Error Examples - Validation Error
+  type: http
+  seq: 15
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/imagen-3",
+    "prompt": "",
+    "n": 20,
+    "size": "invalid-size"
+  }
+}
+
+docs {
+  Example of validation errors in request parameters.
+  
+  This request has multiple validation issues:
+  - Empty prompt (required, min 1 character)
+  - n=20 (max allowed is 16)
+  - Invalid size format (should be "WIDTHxHEIGHT" or "auto")
+  
+  Expected Response:
+  {
+    "error": {
+      "message": "Validation error: [specific field error] at [field path]",
+      "type": "validation_error"
+    }
+  }
+  
+  The API validates all parameters using Zod schemas before processing.
+}
+
+tests {
+  test("Should return 400 validation error", function() {
+    expect(res.getStatus()).to.equal(400);
+  });
+  
+  test("Should indicate validation error", function() {
+    expect(res.getBody().error.message).to.contain('Validation error');
+  });
+}

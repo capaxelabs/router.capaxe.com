@@ -1,12 +1,12 @@
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
-import { CloudflareBindings } from '../types/env'
+import { CloudflareBindings, ContextVariables } from '../types/env'
 import { generateVideo } from '../services/videoService'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { parseMultipartFormData, combineFieldsAndFiles } from '../middleware/uploadMiddleware'
 import { VideoGenerationRequest, VideoGenerationResponse, validateVideoRequest } from '../lib/validation'
 
-const app = new Hono<{ Bindings: CloudflareBindings }>()
+const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
 /**
  * POST /v1/openai/videos/generations

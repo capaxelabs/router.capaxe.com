@@ -1,0 +1,41 @@
+meta {
+  name: List Available Models
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{APP_URL}}/v1/models
+  body: none
+  auth: none
+}
+
+docs {
+  Get all available Google AI models for image and video generation.
+  
+  Currently includes:
+  - Google Image Models: imagen-3, imagen-4 variants, gemini models
+  - Google Video Models: veo-2, veo-3 variants
+  
+  Returns a JSON object with model IDs as keys and model configurations as values.
+  Each model includes:
+  - providers: Available providers for this model
+  - pricing: Cost information
+  - arena_score: Performance rating (if available)
+  - release_date: Model release date (if available)
+}
+
+tests {
+  test("Status should be 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Response should be an object", function() {
+    expect(res.getBody()).to.be.an('object');
+  });
+  
+  test("Should contain Google models", function() {
+    const models = Object.keys(res.getBody());
+    expect(models.some(m => m.startsWith('google/'))).to.be.true;
+  });
+}

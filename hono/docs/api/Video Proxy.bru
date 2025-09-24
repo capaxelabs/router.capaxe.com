@@ -1,0 +1,45 @@
+meta {
+  name: Video Proxy
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{APP_URL}}/v1/openai/videos/proxy?url=https://generativelanguage.googleapis.com/v1beta/files/example-file-id:download?alt=media&model=google/veo-3
+  body: none
+  auth: none
+}
+
+params:query {
+  url: https://generativelanguage.googleapis.com/v1beta/files/example-file-id:download?alt=media
+  model: google/veo-3
+}
+
+docs {
+  Proxy video files from Google APIs without exposing API keys.
+  
+  This endpoint is used internally by the video generation system to:
+  - Serve video files from Google's storage
+  - Hide API keys from client requests
+  - Provide direct video streaming
+  
+  Parameters:
+  - url: The Google API video download URL (must match allowed pattern)
+  - model: The model used to generate the video (for API key selection)
+  
+  Security:
+  - Only allows URLs from generativelanguage.googleapis.com
+  - URLs must match the expected download pattern
+  - API keys are automatically added server-side
+  
+  Returns the video file directly with appropriate content headers.
+}
+
+tests {
+  test("Should validate URL format", function() {
+    // This will likely return 400 for invalid URL format
+    if (res.getStatus() === 400) {
+      expect(res.getBody().error.type).to.equal('invalid_url');
+    }
+  });
+}

@@ -1,5 +1,5 @@
 import { Context } from 'hono'
-import { CloudflareBindings } from '../types/env'
+import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleImageModels } from '../shared/imageModels/google'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
@@ -30,7 +30,7 @@ export interface GenerationResult {
  * Generate images using Google models
  */
 export async function generateImage(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: ImageGenerationParams,
   userId: string
 ): Promise<GenerationResult> {
@@ -105,7 +105,7 @@ export async function generateImage(
  * Generate images using Google Gemini API
  */
 async function generateGemini(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: ImageGenerationParams & { model: string },
   userId: string
 ): Promise<GenerationResult> {
@@ -212,7 +212,7 @@ async function generateGemini(
  * Generate images using Google Vertex AI
  */
 async function generateVertex(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: ImageGenerationParams & { model: string },
   userId: string
 ): Promise<GenerationResult> {
@@ -270,7 +270,7 @@ async function generateVertex(
  * Generate images using OpenRouter (for Gemini models)
  */
 async function generateOpenRouter(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: ImageGenerationParams & { model: string },
   userId: string
 ): Promise<GenerationResult> {

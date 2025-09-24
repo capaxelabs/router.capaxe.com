@@ -1,0 +1,32 @@
+meta {
+  name: API Info
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{APP_URL}}/
+  body: none
+  auth: none
+}
+
+docs {
+  Get general information about the ImageRouter API.
+  
+  Returns:
+  - name: API name
+  - version: Current version
+  - description: API description
+  - framework: Technology stack
+  - docs: Documentation URL
+}
+
+tests {
+  test("Status should be 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Response should contain API name", function() {
+    expect(res.getBody().name).to.equal("ImageRouter API");
+  });
+}

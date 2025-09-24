@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import { googleImageModels } from '../shared/imageModels/google'
 import { googleVideoModels } from '../shared/videoModels/google'
-import { CloudflareBindings } from '../types/env'
+import { CloudflareBindings, ContextVariables } from '../types/env'
 
-const app = new Hono<{ Bindings: CloudflareBindings }>()
+const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
 /**
  * Get all available models (Google only for Phase 2)

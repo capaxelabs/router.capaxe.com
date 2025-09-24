@@ -1,0 +1,54 @@
+meta {
+  name: Rate Limit Test
+  type: http
+  seq: 16
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/imagen-3-fast",
+    "prompt": "Test rate limiting - simple image",
+    "n": 1,
+    "size": "512x512"
+  }
+}
+
+docs {
+  Test rate limiting functionality.
+  
+  The API implements rate limiting:
+  - General rate limit: 20 requests per second per IP
+  - Image generation: 6000 requests per minute per IP
+  - Video generation: Same as image generation
+  
+  When rate limited, you'll receive:
+  {
+    "error": {
+      "message": "Too many requests, please try again later.",
+      "type": "rate_limit_error"
+    }
+  }
+  
+  HTTP Status: 429 Too Many Requests
+  
+  Rate limit headers are included in responses:
+  - X-RateLimit-Limit: Request limit
+  - X-RateLimit-Remaining: Remaining requests
+  - X-RateLimit-Reset: Reset time
+  
+  Use this request multiple times quickly to test rate limiting.
+}
+
+tests {
+  test("Should succeed or return rate limit error", function() {
+    if (res.getStatus() === 429) {
+      expect(res.getBody().error.type).to.equal('rate_limit_error');
+    }
+  });
+}

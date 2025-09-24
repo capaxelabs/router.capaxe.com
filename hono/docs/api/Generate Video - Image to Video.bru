@@ -1,0 +1,46 @@
+meta {
+  name: Generate Video - Image to Video
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/videos/generations
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  model: google/veo-3
+  prompt: Animate this image with gentle movement, the character should blink and smile
+  duration: 3
+  fps: 30
+  response_format: url
+  image: @file(/path/to/your/source-image.jpg)
+}
+
+docs {
+  Generate video from a source image using multipart form upload.
+  
+  This endpoint allows you to:
+  - Animate static images
+  - Create video sequences starting from an image
+  - Add motion and life to existing artwork
+  
+  Required:
+  - image: Source image file (JPEG, PNG, WebP up to 20MB)
+  - prompt: Description of how to animate the image
+  - model: Google video model to use
+  
+  Optional parameters same as text-to-video generation.
+  
+  Note: Replace @file(/path/to/your/source-image.jpg) with actual file path.
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+}

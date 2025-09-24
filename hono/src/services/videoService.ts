@@ -1,5 +1,5 @@
 import { Context } from 'hono'
-import { CloudflareBindings } from '../types/env'
+import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleVideoModels } from '../shared/videoModels/google'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
@@ -28,7 +28,7 @@ export interface VideoGenerationResult {
  * Generate videos using Google models
  */
 export async function generateVideo(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: VideoGenerationParams,
   userId: string
 ): Promise<VideoGenerationResult> {
@@ -93,7 +93,7 @@ export async function generateVideo(
  * Generate videos using Google Gemini API
  */
 async function generateGeminiVideo(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: VideoGenerationParams & { model: string },
   userId: string
 ): Promise<VideoGenerationResult> {
@@ -200,7 +200,7 @@ async function generateGeminiVideo(
  * Generate videos using Google Vertex AI
  */
 async function generateVertexVideo(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: VideoGenerationParams & { model: string },
   userId: string
 ): Promise<VideoGenerationResult> {
@@ -258,7 +258,7 @@ async function generateVertexVideo(
  * Generate videos using OpenRouter (for Gemini models)
  */
 async function generateOpenRouterVideo(
-  c: Context<{ Bindings: CloudflareBindings }>,
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: VideoGenerationParams & { model: string },
   userId: string
 ): Promise<VideoGenerationResult> {

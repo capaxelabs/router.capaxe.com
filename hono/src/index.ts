@@ -1,13 +1,13 @@
 import { Hono } from 'hono'
 import { createDatabase } from './db'
-import { CloudflareBindings } from './types/env'
+import { CloudflareBindings, ContextVariables } from './types/env'
 
 // Import middleware
 import { corsMiddleware, securityHeaders, apiSecurityHeaders, requestLogger, errorHandler, notFoundHandler, healthCheck } from './middleware/security'
 import { generalLimiter, ipLimiter } from './middleware/rateLimiting'
 
 // Create Hono app with proper typing
-const app = new Hono<{ Bindings: CloudflareBindings }>()
+const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
 // Global middleware setup
 app.use('*', requestLogger)
@@ -49,10 +49,10 @@ app.get('/ip', (c) => {
 app.get('/', (c) => {
   return c.json({
     name: 'ImageRouter API',
-    version: '2.0.0',
+    version: '1.0.0',
     description: 'A unified API for image and video generation models',
     framework: 'Hono + Cloudflare Workers',
-    docs: 'https://docs.imagerouter.io'
+    docs: 'https://docs.imagerouter.capaxe.com'
   })
 })
 

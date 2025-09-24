@@ -1,0 +1,47 @@
+meta {
+  name: Generate Image - Gemini
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/gemini-2.0-flash-exp",
+    "prompt": "A beautiful sunset over mountains, digital art style, high quality, vibrant colors",
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "high",
+    "response_format": "url"
+  }
+}
+
+docs {
+  Generate images using Google Gemini models.
+  
+  Parameters:
+  - model: Google model ID (e.g., "google/gemini-2.0-flash-exp")
+  - prompt: Text description of the image to generate
+  - n: Number of images to generate (1-16, default: 1)
+  - size: Image dimensions ("1024x1024" or "auto", default: "auto")
+  - quality: Image quality ("auto", "low", "medium", "high")
+  - response_format: Response format ("url" or "b64_json", default: "url")
+  - user: Optional user identifier
+  
+  Returns:
+  - created: Unix timestamp
+  - data: Array of generated images with URLs or base64 data
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+}
