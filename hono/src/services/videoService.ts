@@ -380,8 +380,12 @@ async function handleCompletedOperation(operation: any, providerKey: string, env
   // Extract video data from the response
   const videoData = operation.response?.generatedVideos?.[0]
   console.log('videoData', JSON.stringify(videoData))
-  if (videoData?.videoUri) {
-    const videoResponse = await fetch(videoData.videoUri, {
+  
+  // Handle both old and new response formats
+  const videoUri = videoData?.video?.uri || videoData?.videoUri
+  
+  if (videoUri) {
+    const videoResponse = await fetch(videoUri, {
       headers: {
         'x-goog-api-key': providerKey
       }
@@ -414,7 +418,7 @@ async function handleCompletedOperation(operation: any, providerKey: string, env
       throw new Error('Failed to download generated video')
     }
   } else {
-    throw new Error('No video URI in completed operation')
+    throw new Error('No video URI found in completed operation. Expected videoData.video.uri or videoData.videoUri')
   }
 }
 
