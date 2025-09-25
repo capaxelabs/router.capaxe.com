@@ -21,6 +21,7 @@ export interface Provider {
 export interface RequestParams {
   model?: string
   image?: string
+  provider?: string  // Allow explicit provider selection
   files?: {
     image?: any[]
     'image[]'?: any[]
@@ -69,6 +70,24 @@ export function selectProvider(providers: Provider[], requestParams: RequestPara
   if (modelId === 'bytedance/seedream-v3' || modelId === 'bytedance/seedream-v4') {
     // Prefer NanoGPT for pure text-to-image; use RunWare when an input image is supplied
     desiredProviderId = hasInputImage ? 'runware' : 'nanogpt'
+  }
+
+  // Special-case selection for Seedance video models
+  if (modelId === 'bytedance/seedance-1-pro' || modelId === 'bytedance/seedance-1-lite') {
+    // Priority: Runware (fastest) > Replicate (balanced) > WaveSpeed (fallback)
+    if (hasInputImage) {
+      // For image-to-video, prefer providers with better I2V support
+      desiredProviderId = 'runware' // Best I2V performance
+    } else {
+      // For text-to-video, consider cost and speed
+      desiredProviderId = 'replicate' // Good balance of cost and quality
+    }
+  }
+
+  // Special-case selection based on user preferences or request parameters
+  if (requestParams.provider) {
+    // Allow explicit provider selection via API parameter
+    desiredProviderId = requestParams.provider
   }
 
   // Find index of desired provider; fallback to 0 if not found

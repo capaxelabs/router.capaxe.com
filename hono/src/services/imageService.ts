@@ -478,68 +478,102 @@ async function generateRunware(
   params: ImageGenerationParams & { model: string },
   userId: string
 ): Promise<GenerationResult> {
+  const providerUrl = 'https://api.runware.ai/v1'
   const providerKey = c.env.RUNWARE_API_KEY
   
   if (!providerKey) {
     throw new Error('RUNWARE_API_KEY environment variable is required')
   }
 
-  // Import the Runware SDK dynamically
-  const { Runware } = await import('@runware/sdk-js')
-  
-  const runware = new Runware({ apiKey: providerKey })
+  // Generate a unique task UUID for tracking
+  const taskUUID = `task-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
+  const taskType = params.model.includes('runware:110@1') ? 'imageBackgroundRemoval' : 'imageInference'
 
   // Extract width and height from size parameter
   const { width, height } = extractWidthHeight(params.size || 'auto')
 
-  // Build the request parameters
-  const requestParams: any = {
+  // Build the Runware task payload
+  const taskPayload: any = {
+    taskType,
+    taskUUID,
     positivePrompt: params.prompt,
     model: params.model,
-    width: width || 1024,
-    height: height || 1024,
+    outputFormat: "WEBP",
     numberResults: params.n || 1,
+    includeCost: true
   }
 
-  // Add optional parameters
+  // Set dimensions for non-background-removal models
+  if (!params.model.includes('runware:110@1')) {
+    taskPayload.width = width || 1024
+    taskPayload.height = height || 1024
+  }
+
+  // Add steps if provided
   if (params.steps) {
-    requestParams.steps = params.steps
+    taskPayload.steps = params.steps
   }
 
-  // Add negative prompt if available
-  if (params.negative_prompt) {
-    requestParams.negativePrompt = params.negative_prompt
+  // Handle different image types based on processed parameters
+  if (params.referenceImages) {
+    taskPayload.referenceImages = Array.isArray(params.referenceImages) 
+      ? params.referenceImages 
+      : [params.referenceImages]
   }
 
-  // Add image for image-to-image generation
-  if (params.imagesData && params.imagesData.length > 0) {
-    const imageData = params.imagesData[0]
-    if (imageData.data) {
-      // Convert base64 to buffer for Runware
-      const imageBuffer = Buffer.from(imageData.data, 'base64')
-      const imageBlob = new Blob([imageBuffer], { 
-        type: imageData.type || 'image/png' 
-      })
-      
-      // Upload image to Runware first
-      const uploadResult = await runware.uploadImage({ image: imageBlob })
-      requestParams.imageInitiator = uploadResult.imageUUID
-      requestParams.strength = 0.8 // Default strength for image-to-image
-    }
+  // Background removal support
+  if (params.inputImage) {
+    taskPayload.inputImage = params.inputImage
+  }
+
+  // Image-to-image support
+  if (params.seedImage) {
+    taskPayload.seedImage = params.seedImage
+    taskPayload.strength = typeof params.strength === 'number' ? params.strength : 0.8
+  }
+
+  // Inpainting support (mask)
+  if (params.maskImage) {
+    taskPayload.maskImage = params.maskImage
   }
 
   try {
-    // Generate images using Runware
-    const images = await runware.requestImages(requestParams)
+    const response = await fetch(providerUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${providerKey}`
+      },
+      body: JSON.stringify([taskPayload])
+    })
 
-    // Process the response
+    const data = await response.json()
+
+    if (!response.ok || !data?.data) {
+      const errorObj = data?.errors?.[0] || {}
+      const formattedError = {
+        status: response.status,
+        statusText: errorObj?.code || 'Error',
+        error: {
+          message: errorObj?.message || 'Runware generation failed',
+          type: errorObj?.code || 'runware_error'
+        },
+        original_response_from_provider: data
+      }
+      throw new Error(JSON.stringify(formattedError))
+    }
+
+    // Locate result corresponding to our taskUUID
+    const taskResult = data.data.find((item: any) => item.taskUUID === taskUUID) || data.data[0]
+    const imageURL = taskResult?.imageURL || null
+
     return {
       created: Math.floor(Date.now() / 1000),
-      data: images.map((image: any) => ({
-        url: image.imageURL,
+      data: [{
+        url: imageURL,
         revised_prompt: null,
-      })),
-      cost: images.length * 0.002 // Estimate cost - will be updated by postCalcFunction
+      }],
+      cost: taskResult?.cost || 0
     }
   } catch (error) {
     const formattedError = {

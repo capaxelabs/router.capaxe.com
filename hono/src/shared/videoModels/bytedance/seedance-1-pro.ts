@@ -24,6 +24,19 @@ class Seedance1Pro {
           },
           applyImage: applyImageRunwareVideo,
         }, {
+          id: 'replicate',
+          model_name: 'bytedance/seedance-1-pro',
+          pricing: {
+            type: PRICING_TYPES.POST_GENERATION,
+            postCalcFunction: postCalcSimple,
+            range: {
+              min: 0.15,
+              average: 0.4,
+              max: 0.6,
+            },
+          },
+          applyImage: this.applyImageReplicate,
+        }, {
           id: 'wavespeed',
           model_name: 'bytedance/seedance-v1-pro-t2v-720p',
           pricing: {
@@ -51,6 +64,15 @@ class Seedance1Pro {
     params.image = await processSingleFile(params.files.image)
     params.model = 'bytedance/seedance-v1-pro-i2v-720p'
     delete params.files.image
+    return params
+  }
+
+  async applyImageReplicate(params: any): Promise<any> {
+    // Process image files if provided
+    if (params.files?.image) {
+      params.image = await processSingleFile(params.files.image)
+      delete params.files.image
+    }
     return params
   }
 }
