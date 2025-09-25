@@ -1,21 +1,13 @@
 meta {
   name: Get IP Address
   type: http
-  seq: 3
+  seq: 4
 }
 
 get {
   url: {{APP_URL}}/ip
   body: none
   auth: none
-}
-
-docs {
-  Debug endpoint to check the detected client IP address.
-  Useful for testing rate limiting and proxy configurations.
-  
-  Returns:
-  - ip: Detected client IP address
 }
 
 tests {
@@ -26,4 +18,12 @@ tests {
   test("Response should contain IP", function() {
     expect(res.getBody().ip).to.be.a('string');
   });
+}
+
+docs {
+  Debug endpoint to check the detected client IP address.
+  Useful for testing rate limiting and proxy configurations.
+  
+  Returns:
+  - ip: Detected client IP address
 }

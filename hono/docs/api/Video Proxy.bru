@@ -1,7 +1,7 @@
 meta {
   name: Video Proxy
   type: http
-  seq: 12
+  seq: 15
 }
 
 get {
@@ -13,6 +13,15 @@ get {
 params:query {
   url: https://generativelanguage.googleapis.com/v1beta/files/example-file-id:download?alt=media
   model: google/veo-3
+}
+
+tests {
+  test("Should validate URL format", function() {
+    // This will likely return 400 for invalid URL format
+    if (res.getStatus() === 400) {
+      expect(res.getBody().error.type).to.equal('invalid_url');
+    }
+  });
 }
 
 docs {
@@ -33,13 +42,4 @@ docs {
   - API keys are automatically added server-side
   
   Returns the video file directly with appropriate content headers.
-}
-
-tests {
-  test("Should validate URL format", function() {
-    // This will likely return 400 for invalid URL format
-    if (res.getStatus() === 400) {
-      expect(res.getBody().error.type).to.equal('invalid_url');
-    }
-  });
 }

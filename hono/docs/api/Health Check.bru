@@ -1,22 +1,13 @@
 meta {
   name: Health Check
   type: http
-  seq: 1
+  seq: 2
 }
 
 get {
   url: {{APP_URL}}/health
   body: none
   auth: none
-}
-
-docs {
-  Check if the API is running and healthy.
-  
-  Returns:
-  - status: "ok" if healthy
-  - timestamp: Current server timestamp
-  - environment: Current environment (development/production)
 }
 
 tests {
@@ -27,4 +18,13 @@ tests {
   test("Response should contain status ok", function() {
     expect(res.getBody().status).to.equal("ok");
   });
+}
+
+docs {
+  Check if the API is running and healthy.
+  
+  Returns:
+  - status: "ok" if healthy
+  - timestamp: Current server timestamp
+  - environment: Current environment (development/production)
 }

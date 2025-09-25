@@ -1,7 +1,7 @@
 meta {
   name: Error Examples - Validation Error
   type: http
-  seq: 15
+  seq: 16
 }
 
 post {
@@ -17,6 +17,16 @@ body:json {
     "n": 20,
     "size": "invalid-size"
   }
+}
+
+tests {
+  test("Should return 400 validation error", function() {
+    expect(res.getStatus()).to.equal(400);
+  });
+  
+  test("Should indicate validation error", function() {
+    expect(res.getBody().error.message).to.contain('Validation error');
+  });
 }
 
 docs {
@@ -36,14 +46,4 @@ docs {
   }
   
   The API validates all parameters using Zod schemas before processing.
-}
-
-tests {
-  test("Should return 400 validation error", function() {
-    expect(res.getStatus()).to.equal(400);
-  });
-  
-  test("Should indicate validation error", function() {
-    expect(res.getBody().error.message).to.contain('Validation error');
-  });
 }

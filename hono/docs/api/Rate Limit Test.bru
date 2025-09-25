@@ -1,7 +1,7 @@
 meta {
   name: Rate Limit Test
   type: http
-  seq: 16
+  seq: 21
 }
 
 post {
@@ -17,6 +17,14 @@ body:json {
     "n": 1,
     "size": "512x512"
   }
+}
+
+tests {
+  test("Should succeed or return rate limit error", function() {
+    if (res.getStatus() === 429) {
+      expect(res.getBody().error.type).to.equal('rate_limit_error');
+    }
+  });
 }
 
 docs {
@@ -43,12 +51,4 @@ docs {
   - X-RateLimit-Reset: Reset time
   
   Use this request multiple times quickly to test rate limiting.
-}
-
-tests {
-  test("Should succeed or return rate limit error", function() {
-    if (res.getStatus() === 429) {
-      expect(res.getBody().error.type).to.equal('rate_limit_error');
-    }
-  });
 }

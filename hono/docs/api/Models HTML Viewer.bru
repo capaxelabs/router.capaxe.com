@@ -1,13 +1,23 @@
 meta {
   name: Models HTML Viewer
   type: http
-  seq: 5
+  seq: 6
 }
 
 get {
   url: {{APP_URL}}/models/ui
   body: none
   auth: none
+}
+
+tests {
+  test("Status should be 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Content-Type should be text/html", function() {
+    expect(res.getHeaders()['content-type']).to.contain('text/html');
+  });
 }
 
 docs {
@@ -22,14 +32,4 @@ docs {
   - jQuery-powered interactions
   
   Access this in your browser for a user-friendly way to explore available models.
-}
-
-tests {
-  test("Status should be 200", function() {
-    expect(res.getStatus()).to.equal(200);
-  });
-  
-  test("Content-Type should be text/html", function() {
-    expect(res.getHeaders()['content-type']).to.contain('text/html');
-  });
 }
