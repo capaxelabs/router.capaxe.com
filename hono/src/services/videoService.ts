@@ -271,44 +271,40 @@ async function generateGeminiVideo(
     // Start the video generation operation
     let operation = await ai.models.generateVideos(generateOptions)
     
-    // Poll for completion using the cleaner SDK approach
-    while (!operation.done) {
+    // Store operation details for polling (we'll implement this via queue re-queuing)
+    const operationData = {
+      operationName: operation.name,
+      startTime: Date.now(),
+      maxWaitTime: 20 * 60 * 1000, // 20 minutes max
+      pollInterval: 30 * 1000 // 30 seconds between polls
+    }
+    
+    // Check if already completed (unlikely but possible)
+    if (operation.done) {
+      return await handleCompletedOperation(operation, providerKey)
+    }
+    
+    // For long-running operations, we need to implement polling via re-queuing
+    // This is a simplified approach - in production, store operationData in database
+    // and re-queue the task for continued polling
+    
+    // Limited polling for Cloudflare Workers (max 2 minutes to stay safe)
+    const maxPollTime = 2 * 60 * 1000 // 2 minutes
+    const pollStart = Date.now()
+    
+    while (!operation.done && (Date.now() - pollStart < maxPollTime)) {
       await new Promise((resolve) => setTimeout(resolve, 10000)) // Wait 10 seconds
-      // Refresh the operation object to get the latest status
       operation = await ai.operations.getVideosOperation({ operation })
     }
     
-    // Once done, the result is in operation.response
-    if (operation.error) {
-      throw new Error(`Veo generation failed: ${JSON.stringify(operation.error)}`)
-    }
-
-    // Extract video data from the response
-    const videoData = operation.response?.generatedVideos?.[0]
-    if (videoData?.videoUri) {
-      // Download the video and convert to base64
-      const videoResponse = await fetch(videoData.videoUri, {
-        headers: {
-          'x-goog-api-key': providerKey
-        }
-      })
-      
-      if (videoResponse.ok) {
-        const videoBuffer = await videoResponse.arrayBuffer()
-        const base64Video = btoa(String.fromCharCode(...new Uint8Array(videoBuffer)))
-        
-        return {
-          created: Math.floor(Date.now() / 1000),
-          data: [{
-            b64_json: base64Video,
-            revised_prompt: null
-          }]
-        }
-      } else {
-        throw new Error('Failed to download generated video')
-      }
+    if (operation.done) {
+      // Completed within worker timeout
+      return await handleCompletedOperation(operation, providerKey)
     } else {
-      throw new Error('No video URI in completed operation')
+      // Still processing - need to re-queue for continued polling
+      // For now, we'll throw an error and handle this via external retry mechanism
+      // In production, you'd want to store the operation name and trigger polling
+      throw new Error(`Video generation still in progress after 2 minutes. Operation: ${operation.name}. Use async processing for proper handling.`)
     }
     
   } catch (error) {
@@ -324,6 +320,44 @@ async function generateGeminiVideo(
 
     throw new Error(JSON.stringify(formattedError))
   }
+}
+
+/**
+ * Handle completed Google operation
+ */
+async function handleCompletedOperation(operation: any, providerKey: string) {
+  if (operation.error) {
+    throw new Error(`Veo generation failed: ${JSON.stringify(operation.error)}`)
+  }
+
+  // Extract video data from the response
+  const videoData = operation.response?.generatedVideos?.[0]
+  if (videoData?.videoUri) {
+    // Download the video and convert to base64
+    const videoResponse = await fetch(videoData.videoUri, {
+      headers: {
+        'x-goog-api-key': providerKey
+      }
+    })
+    
+    if (videoResponse.ok) {
+      const videoBuffer = await videoResponse.arrayBuffer()
+      const base64Video = btoa(String.fromCharCode(...new Uint8Array(videoBuffer)))
+      
+      return {
+        created: Math.floor(Date.now() / 1000),
+        data: [{
+          b64_json: base64Video,
+          revised_prompt: null
+        }]
+      }
+    } else {
+      throw new Error('Failed to download generated video')
+    }
+  } else {
+    throw new Error('No video URI in completed operation')
+  }
+}
 }
 
 /**

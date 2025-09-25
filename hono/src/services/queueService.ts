@@ -10,11 +10,22 @@ import { generateTaskId } from './taskIdGenerator'
  */
 export interface QueueMessage {
   taskId: string
-  type: 'image' | 'video'
+  type: 'image' | 'video' | 'video_poll'
   userId: string
   request: any
   timestamp: number
   usageId: string // Links to api_usage record
+  
+  // For video polling continuation (generic for any provider)
+  pollingData?: {
+    provider: 'google' | 'replicate' | 'runpod' | 'fal' | 'luma' | string
+    operationId: string // Google operation name, Replicate prediction ID, etc.
+    operationUrl?: string // Direct polling URL if available
+    pollAttempt: number
+    maxPollAttempts: number
+    pollInterval?: number // Seconds between polls (default: 30)
+    metadata?: Record<string, any> // Provider-specific data
+  }
 }
 
 /**
@@ -344,4 +355,46 @@ export function createQueueService(
   }
 
   return new QueueService(queue, db)
+}
+
+/**
+ * Create a polling message for continued operation checking (any provider)
+ */
+export async function createPollingMessage(
+  queue: Queue,
+  taskId: string,
+  userId: string,
+  usageId: string,
+  provider: string,
+  operationId: string,
+  pollAttempt: number = 1,
+  maxPollAttempts: number = 40,
+  pollInterval: number = 30, // seconds
+  operationUrl?: string,
+  metadata?: Record<string, any>
+): Promise<void> {
+  const pollingMessage: QueueMessage = {
+    taskId,
+    type: 'video_poll',
+    userId,
+    request: {},
+    timestamp: Date.now(),
+    usageId,
+    pollingData: {
+      provider,
+      operationId,
+      operationUrl,
+      pollAttempt,
+      maxPollAttempts,
+      pollInterval,
+      metadata
+    }
+  }
+
+  // Delay the message by the specified poll interval
+  await queue.send(pollingMessage, {
+    delaySeconds: pollInterval
+  })
+
+  console.log(`Created ${provider} polling message for task ${taskId}, attempt ${pollAttempt}/${maxPollAttempts}`)
 }
