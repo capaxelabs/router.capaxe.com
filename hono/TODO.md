@@ -22,6 +22,9 @@ This document outlines the phased migration from Express to Hono, focusing on Go
 - [x] Migrate `PricingScheme.js` (pricing constants)
 - [x] Migrate `imageHelpers.js` (Cloudflare-compatible utilities)
 - [x] Migrate `storageService.js` (R2 instead of S3)
+- [x] **Implement CUID for unique filenames instead of user IDs**
+- [x] **Organize files in date-based folder structure (images/YYYY/MM/DD/, videos/YYYY/MM/DD/)**
+- [x] **Fix R2 storage integration with native Cloudflare APIs (removed AWS SDK compatibility issues)**
 - [x] Migrate `providerSelector.js` (provider selection logic)
 - [x] Create Cloudflare Workers-compatible file upload handling
 
@@ -35,50 +38,52 @@ This document outlines the phased migration from Express to Hono, focusing on Go
 
 ---
 
-## 🎯 Phase 2: Google Models Migration
+## 🎯 Phase 2: Google Models Migration ✅ COMPLETED (2025-01-25)
 
-### 2.1 Google Image Models (14 models)
-- [ ] `google/gemini-2.0-flash-exp.js`
-- [ ] `google/gemini-2.0-flash-prev.js` 
-- [ ] `google/gemini-2.5-flash-free.js`
-- [ ] `google/gemini-2.5-flash.js`
-- [ ] `google/imagen-3-fast.js`
-- [ ] `google/imagen-3.js`
-- [ ] `google/imagen-4-05-20-ultra.js`
-- [ ] `google/imagen-4-05-20.js`
-- [ ] `google/imagen-4-06-06-fast.js`
-- [ ] `google/imagen-4-06-06-ultra.js`
-- [ ] `google/imagen-4-06-06.js`
-- [ ] `google/imagen-4-fast.js`
-- [ ] `google/imagen-4-ultra.js`
-- [ ] `google/imagen-4.js`
+### 2.1 Google Image Models (14 models) ✅
+- [x] `google/gemini-2.0-flash-exp.js`
+- [x] `google/gemini-2.0-flash-prev.js` 
+- [x] `google/gemini-2.5-flash-free.js`
+- [x] `google/gemini-2.5-flash.js`
+- [x] `google/imagen-3-fast.js`
+- [x] `google/imagen-3.js`
+- [x] `google/imagen-4-05-20-ultra.js`
+- [x] `google/imagen-4-05-20.js`
+- [x] `google/imagen-4-06-06-fast.js`
+- [x] `google/imagen-4-06-06-ultra.js`
+- [x] `google/imagen-4-06-06.js`
+- [x] `google/imagen-4-fast.js`
+- [x] `google/imagen-4-ultra.js`
+- [x] `google/imagen-4.js`
 
-### 2.2 Google Video Models (4 models)
-- [ ] `google/veo-2-mock.js`
-- [ ] `google/veo-2.js`
-- [ ] `google/veo-3-fast.js`
-- [ ] `google/veo-3.js`
+### 2.2 Google Video Models (4 models) ✅
+- [x] `google/veo-2-mock.js`
+- [x] `google/veo-2.js`
+- [x] `google/veo-3-fast.js`
+- [x] `google/veo-3.js`
 
-### 2.3 Google Integration Services
-- [ ] Migrate Google Vertex AI authentication
-- [ ] Migrate Google Gemini API integration  
-- [ ] Migrate `generateImage()` function for Google models
-- [ ] Migrate `generateVideo()` function for Google models
-- [ ] Create Google-specific parameter validation
-- [ ] Set up Google service account key handling
+### 2.3 Google Integration Services ✅
+- [x] Migrate Google Vertex AI authentication
+- [x] Migrate Google Gemini API integration  
+- [x] Migrate `generateImage()` function for Google models
+- [x] Migrate `generateVideo()` function for Google models
+- [x] Create Google-specific parameter validation
+- [x] Set up Google service account key handling
 
-### 2.4 Google API Endpoints
-- [ ] `POST /v1/openai/images/generations` (Google models only)
-- [ ] `POST /v1/openai/images/edits` (Google models only)
-- [ ] `POST /v1/openai/videos/generations` (Google models only)
-- [ ] `GET /v1/models` (Google models only)
+### 2.4 Google API Endpoints ✅
+- [x] `POST /v1/openai/images/generations` (Google models only)
+- [x] `POST /v1/openai/images/edits` (Google models only)
+- [x] `POST /v1/openai/videos/generations` (Google models only)
+- [x] `GET /v1/models` (Google models only)
 
-### 2.5 Testing & Validation
-- [ ] Create tests for Google image models
-- [ ] Create tests for Google video models
-- [ ] Test Google authentication flow
-- [ ] Test file upload with Google models
-- [ ] Performance testing for Google endpoints
+### 2.5 Testing & Validation ✅
+- [x] Create tests for Google image models
+- [x] Create tests for Google video models
+- [x] Test Google authentication flow
+- [x] Test file upload with Google models
+- [x] Performance testing for Google endpoints
+
+**Phase 2 Status**: ✅ **COMPLETED** - All Google models are fully implemented and tested with R2 storage integration including CUID filenames and date-based folder organization
 
 ---
 
@@ -214,8 +219,28 @@ This document outlines the phased migration from Express to Hono, focusing on Go
 - **Phase 5 (Future):** 50+ additional models from other providers
 
 **Estimated Timeline:** 
-- Phase 1: 1-2 weeks
-- Phase 2: 2-3 weeks  
-- Phase 3: 1-2 weeks
+- Phase 1: ✅ 1-2 weeks (COMPLETED)
+- Phase 2: ✅ 2-3 weeks (COMPLETED)
+- Phase 3: 1-2 weeks  
 - Phase 4: 1-2 weeks
 - Phase 5: 4-6 weeks (ongoing)
+
+---
+
+## 🎉 Recent Accomplishments (September 2025)
+
+### R2 Storage Enhancement ✅ COMPLETED
+- **CUID Implementation**: All files now use CUID for unique, collision-resistant filenames instead of user IDs
+- **Date-based Organization**: Files are organized in structured folders:
+  - Images: `/images/YYYY/MM/DD/[cuid].ext`
+  - Videos: `/videos/YYYY/MM/DD/[cuid].ext`
+- **Native R2 Integration**: Removed AWS SDK compatibility issues, using pure Cloudflare R2 APIs
+- **Database Middleware**: Fixed TypeScript typing and environment variable handling for Workers deployment
+- **Testing**: Fully tested with working image generation API returning properly structured URLs
+
+### Working Example:
+```
+https://81cac75fe318d80f4344481afc4799ac.r2.cloudflarestorage.com/images/2025/09/25/cmfyuksaf000000ijet1iryyg.png
+```
+
+**Current Status**: Phase 1 and Phase 2 are fully complete. Ready for Phase 3 (Bytedance models) implementation.
