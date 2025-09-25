@@ -73,7 +73,7 @@ Edit the `CONFIG` object in `comprehensive-api-test.js` to modify:
 ### Generated Files
 - `output/test-summary.json` - Complete test results summary
 - `output/*-response.json` - Individual API response data
-- `fixtures/test-image.png` - Generated test image for multipart uploads
+
 
 ### Test Results Format
 ```json

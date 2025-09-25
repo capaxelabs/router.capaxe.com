@@ -4,7 +4,6 @@ import { CloudflareBindings, ContextVariables } from '../types/env'
 import { createImageGenerationHandler } from '../services/generationWrapper'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
-import { parseMultipartFormData, combineFieldsAndFiles } from '../middleware/uploadMiddleware'
 import { ImageGenerationRequest, ImageGenerationResponse, validateImageRequest } from '../lib/validation'
 import type { NewApiUsage } from '../db/schema'
 import { createQueueService } from '../services/queueService'
@@ -21,61 +20,10 @@ const imageGenerationHandler = createImageGenerationHandler()
 app.post('/generations', 
   ipLimiter,
   validateApiKey,
-  // Parse multipart form data and convert to base64
   async (c, next) => {
-    const contentType = c.req.header('content-type')
+    const jsonBody = await c.req.json()
+    c.set('processedRequestData', jsonBody)
     
-    if (contentType?.includes('multipart/form-data')) {
-      const { fields, files } = await parseMultipartFormData(c)
-      
-      // Convert files to base64 immediately
-      const processedData = { ...fields }
-      
-      if (files.image && files.image.length > 0) {
-        if (files.image.length === 1) {
-          // Single image
-          const file = files.image[0]
-          const arrayBuffer = await file.arrayBuffer()
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-          processedData.image = {
-            data: base64,
-            type: file.type,
-            filename: file.name
-          }
-        } else {
-          // Multiple images  
-          const imageArray = []
-          for (const file of files.image) {
-            const arrayBuffer = await file.arrayBuffer()
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-            imageArray.push({
-              data: base64,
-              type: file.type,
-              filename: file.name
-            })
-          }
-          processedData.image = imageArray
-        }
-      }
-      
-      if (files.mask && files.mask.length > 0) {
-        const file = files.mask[0]
-        const arrayBuffer = await file.arrayBuffer()
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-        processedData.mask = {
-          data: base64,
-          type: file.type,
-          filename: file.name
-        }
-      }
-      
-      // Store processed base64 data in context
-      c.set('processedRequestData', processedData)
-    } else if (contentType?.includes('application/json')) {
-      // For JSON requests, the data is already in the correct format
-      const jsonBody = await c.req.json()
-      c.set('processedRequestData', jsonBody)
-    }
     await next()
   },
   validator('json', (value, c) => {
@@ -242,30 +190,15 @@ app.post('/generations',
 app.post('/edits',
   ipLimiter,
   validateApiKey,
-  // Parse multipart form data (required for image editing)
   async (c, next) => {
-    const { fields, files } = await parseMultipartFormData(c)
-    
-    // Store parsed data in context
-    c.set('parsedFields', fields)
-    c.set('parsedFiles', files)
+    const body = await c.req.json().catch(() => ({}))
+    c.set('parsedFields', body)
     await next()
   },
   validator('json', (_, c) => {
     const parsedFields = c.get('parsedFields')
-    const parsedFiles = c.get('parsedFiles')
     
-    if (!parsedFields || !parsedFiles) {
-      throw new Error('Multipart form data required for image editing')
-    }
-    
-    // Validate that we have required image file
-    if (!parsedFiles.image || parsedFiles.image.length === 0) {
-      throw new Error('Image file is required for image editing')
-    }
-    
-    const combinedData = combineFieldsAndFiles(parsedFields, parsedFiles)
-    return validateImageRequest(combinedData)
+    return validateImageRequest(parsedFields)
   }),
   async (c) => {
     try {
@@ -293,7 +226,6 @@ app.post('/edits',
         delete requestWithImages.image
       }
 
-      // Process uploaded files (fallback for multipart uploads)
       const legacyImagesData = []
       if (parsedFiles?.image) {
         for (const imageFile of parsedFiles.image) {

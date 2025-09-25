@@ -4,7 +4,6 @@ import { CloudflareBindings, ContextVariables } from '../types/env'
 import { createVideoGenerationHandler } from '../services/generationWrapper'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
-import { parseMultipartFormData } from '../middleware/uploadMiddleware'
 import { VideoGenerationRequest, VideoGenerationResponse, validateVideoRequest } from '../lib/validation'
 import { createQueueService } from '../services/queueService'
 
@@ -20,50 +19,11 @@ const videoGenerationHandler = createVideoGenerationHandler()
 app.post('/generations',
   ipLimiter,
   validateApiKey,
-  // Parse multipart form data and convert to base64
   async (c, next) => {
-    const contentType = c.req.header('content-type')
+    // For JSON requests, the data is already in the correct format
+    const jsonBody = await c.req.json()
+    c.set('processedRequestData', jsonBody)
     
-    if (contentType?.includes('multipart/form-data')) {
-      const { fields, files } = await parseMultipartFormData(c)
-      
-      // Convert files to base64 immediately
-      const processedData = { ...fields }
-      
-      if (files.image && files.image.length > 0) {
-        if (files.image.length === 1) {
-          // Single image
-          const file = files.image[0]
-          const arrayBuffer = await file.arrayBuffer()
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-          processedData.image = {
-            data: base64,
-            type: file.type,
-            filename: file.name
-          }
-        } else {
-          // Multiple images  
-          const imageArray = []
-          for (const file of files.image) {
-            const arrayBuffer = await file.arrayBuffer()
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-            imageArray.push({
-              data: base64,
-              type: file.type,
-              filename: file.name
-            })
-          }
-          processedData.image = imageArray
-        }
-      }
-      
-      // Store processed base64 data in context
-      c.set('processedRequestData', processedData)
-    } else if (contentType?.includes('application/json')) {
-      // For JSON requests, the data is already in the correct format
-      const jsonBody = await c.req.json()
-      c.set('processedRequestData', jsonBody)
-    }
     await next()
   },
   validator('json', (value, c) => {
@@ -101,19 +61,6 @@ app.post('/generations',
         delete requestData.image
       }
       
-      // Process uploaded files (fallback for legacy multipart uploads)
-      const legacyFiles = c.get('parsedFiles')
-      if (legacyFiles?.image && legacyFiles.image.length > 0 && !requestData.imagesData) {
-        const legacyImagesData = []
-        for (const imageFile of legacyFiles.image) {
-          legacyImagesData.push({
-            blob: imageFile,
-            filename: imageFile.name || 'image.png'
-          })
-        }
-        requestData.imagesData = legacyImagesData
-        requestData.files = legacyFiles
-      }
 
       if (isAsync) {
         // ASYNC MODE: Create task and return immediately

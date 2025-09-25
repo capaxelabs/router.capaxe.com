@@ -50,6 +50,7 @@ export const VideoGenerationRequestSchema = z.object({
   duration: z.number().min(1).max(10).default(5),
   fps: z.number().int().min(12).max(60).default(24),
   response_format: z.enum(['url', 'b64_json']).default('url'),
+  negative_prompt: z.string().optional(),
   user: z.string().optional(),
   image: z.union([
     z.string(),  // Legacy: Base64 string or URL

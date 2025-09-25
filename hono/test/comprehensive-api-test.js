@@ -121,37 +121,6 @@ async function makeRequest(endpoint, options = {}) {
   }
 }
 
-async function makeMultipartRequest(endpoint, fields, files = {}) {
-  const formData = new FormData()
-  
-  // Add fields
-  for (const [key, value] of Object.entries(fields)) {
-    if (typeof value === 'object') {
-      formData.append(key, JSON.stringify(value))
-    } else {
-      formData.append(key, value)
-    }
-  }
-  
-  // Add files
-  for (const [key, filePath] of Object.entries(files)) {
-    if (fs.existsSync(filePath)) {
-      const fileBuffer = fs.readFileSync(filePath)
-      const blob = new Blob([fileBuffer], { type: 'image/png' })
-      formData.append(key, blob, path.basename(filePath))
-    }
-  }
-  
-  return makeRequest(endpoint, {
-    method: 'POST',
-    body: formData,
-    headers: {
-      'Authorization': `Bearer ${CONFIG.apiKey}`,
-      // Don't set Content-Type for FormData, let browser set it with boundary
-    }
-  })
-}
-
 // Test Cases
 
 async function testHealthCheck() {
@@ -261,8 +230,6 @@ async function testImageToImage() {
     image: CONFIG.testImagePath
   }
   
-  const response = await makeMultipartRequest('/v1/openai/images/edits', fields, files)
-  
   if (response.status === 200 && response.data?.data?.[0]?.url) {
     const url = response.data.data[0].url
     const cost = response.data.cost
@@ -310,8 +277,7 @@ async function testImageToVideo() {
     image: CONFIG.testImagePath
   }
   
-  const response = await makeMultipartRequest('/v1/openai/videos/generations', fields, files)
-  
+
   if (response.status === 200 && response.data?.data?.[0]) {
     const result = response.data.data[0]
     const cost = response.data.cost

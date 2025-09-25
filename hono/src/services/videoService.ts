@@ -39,7 +39,7 @@ export async function generateVideo(
   const startTime = Date.now()
   
   // Get model configuration
-  const modelConfig = googleVideoModels[params.model]
+  const modelConfig = googleVideoModels[params.model as keyof typeof googleVideoModels]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
   }
@@ -93,9 +93,6 @@ export async function generateVideo(
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
-    case 'openrouter':
-      result = await generateOpenRouterVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
   }
@@ -104,7 +101,7 @@ export async function generateVideo(
 
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
-    const storageService = new R2StorageService(c.env.STORAGE_BUCKET)
+    const storageService = new R2StorageService(c.env.STORAGE_BUCKET, c.env.R2_BUCKET_NAME, c.env.R2_CUSTOM_PUBLIC_URL)
     result = await processVideoResult(result, storageService, userId, params.response_format || 'url')
   }
 
@@ -128,7 +125,7 @@ export async function generateVideoAsync(
   const startTime = Date.now()
   
   // Get model configuration
-  const modelConfig = googleVideoModels[params.model]
+  const modelConfig = googleVideoModels[params.model as keyof typeof googleVideoModels]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
   }
@@ -170,9 +167,6 @@ export async function generateVideoAsync(
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
-    case 'openrouter':
-      result = await generateOpenRouterVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
   }
@@ -181,7 +175,7 @@ export async function generateVideoAsync(
 
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
-    const storageService = new R2StorageService(c.env.STORAGE_BUCKET)
+    const storageService = new R2StorageService(c.env.STORAGE_BUCKET, c.env.R2_BUCKET_NAME, c.env.R2_CUSTOM_PUBLIC_URL)
     result = await processVideoResult(result, storageService, userId, params.response_format || 'url')
   }
 
@@ -216,9 +210,16 @@ async function generateGeminiVideo(
 ): Promise<VideoGenerationResult> {
   // Import the SDK dynamically to avoid bundling issues
   const { GoogleGenAI } = await import('@google/genai')
+  const { eq } = await import('drizzle-orm')
   
   const providerKey = getGeminiApiKey(params.model, c.env)
   const ai = new GoogleGenAI({ apiKey: providerKey })
+  
+  // Get database connection
+  const db = c.get('db')
+  if (!db) {
+    throw new Error('Database connection not available')
+  }
   
   // Use the correct Veo model name
   const veoModel = params.model.includes('veo-3') ? 'veo-3.0-generate-001' : 'veo-2.0-generate-001'
@@ -263,10 +264,6 @@ async function generateGeminiVideo(
     if (imageData.data) {
       // Use structured base64 data directly
       base64Data = imageData.data
-    } else if ((imageData as any).blob) {
-      // Fallback for legacy blob format
-      const arrayBuffer = await (imageData as any).blob.arrayBuffer()
-      base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
     } else {
       throw new Error('Invalid image data format')
     }
@@ -285,43 +282,79 @@ async function generateGeminiVideo(
     // Start the video generation operation
     let operation = await ai.models.generateVideos(generateOptions)
     
-    // Store operation details for polling (we'll implement this via queue re-queuing)
+    // Store operation details in database for persistent polling
     const operationData = {
       operationName: operation.name,
+      model: veoModel,
       startTime: Date.now(),
       maxWaitTime: 20 * 60 * 1000, // 20 minutes max
-      pollInterval: 30 * 1000 // 30 seconds between polls
+      pollInterval: 30 * 1000, // 30 seconds between polls
+      status: operation.done ? 'completed' : 'processing',
+      providerKey: providerKey, // Store for downloading video later
+      generateOptions: generateOptions, // Store original request for debugging
+      lastPollTime: Date.now(),
+      pollAttempts: 0,
+      maxPollAttempts: 40 // 40 * 30s = 20 minutes
+    }
+
+    // Find current task in database to store operation data
+    const currentTask = await findCurrentVideoTask(db, userId, params.prompt)
+    if (currentTask) {
+      // Update the task with Google operation metadata
+      await updateTaskWithOperationData(db, currentTask.taskId, operationData)
+      console.log(`Stored Google operation ${operation.name} for task ${currentTask.taskId}`)
+    } else {
+      console.warn('Could not find current task to store operation data')
     }
     
     // Check if already completed (unlikely but possible)
     if (operation.done) {
-      return await handleCompletedOperation(operation, providerKey)
+      if (currentTask) {
+        await updateOperationStatus(db, currentTask.taskId, 'completed', operation)
+      }
+      return await handleCompletedOperation(operation, providerKey, c.env)
     }
     
     // For long-running operations, we need to implement polling via re-queuing
-    // This is a simplified approach - in production, store operationData in database
-    // and re-queue the task for continued polling
+    // Store operation data in database for persistent state management
     
     // Limited polling for Cloudflare Workers (max 2 minutes to stay safe)
     const maxPollTime = 2 * 60 * 1000 // 2 minutes
     const pollStart = Date.now()
+    let pollAttempts = 0
     
     while (!operation.done && (Date.now() - pollStart < maxPollTime)) {
       await new Promise((resolve) => setTimeout(resolve, 10000)) // Wait 10 seconds
       operation = await ai.operations.getVideosOperation({ operation })
+      pollAttempts++
+      
+      // Update polling status in database
+      if (currentTask) {
+        await updatePollingStatus(db, currentTask.taskId, pollAttempts, operation.done || false)
+      }
     }
     
     if (operation.done) {
       // Completed within worker timeout
-      return await handleCompletedOperation(operation, providerKey)
+      if (currentTask) {
+        await updateOperationStatus(db, currentTask.taskId, 'completed', operation)
+      }
+      return await handleCompletedOperation(operation, providerKey, c.env)
     } else {
-      // Still processing - need to re-queue for continued polling
-      // For now, we'll throw an error and handle this via external retry mechanism
-      // In production, you'd want to store the operation name and trigger polling
+      // Still processing - update database with current status and re-queue for continued polling
+      if (currentTask) {
+        await updateOperationStatus(db, currentTask.taskId, 'polling_required', operation, pollAttempts)
+      }
       throw new Error(`Video generation still in progress after 2 minutes. Operation: ${operation.name}. Use async processing for proper handling.`)
     }
     
   } catch (error) {
+    // Update database with error status
+    const currentTask = await findCurrentVideoTask(db, userId, params.prompt)
+    if (currentTask) {
+      await updateOperationStatus(db, currentTask.taskId, 'error', null, 0, error)
+    }
+
     const formattedError = {
       status: 500,
       statusText: 'INTERNAL_ERROR',
@@ -339,7 +372,7 @@ async function generateGeminiVideo(
 /**
  * Handle completed Google operation
  */
-async function handleCompletedOperation(operation: any, providerKey: string) {
+async function handleCompletedOperation(operation: any, providerKey: string, env?: any) {
   if (operation.error) {
     throw new Error(`Veo generation failed: ${JSON.stringify(operation.error)}`)
   }
@@ -357,16 +390,18 @@ async function handleCompletedOperation(operation: any, providerKey: string) {
     if (videoResponse.ok) {
       // Store video in R2 storage instead of converting to base64
       const storageService = new R2StorageService(
-        c.env.STORAGE_BUCKET,
-        c.env.R2_BUCKET_NAME,
-        c.env.R2_CUSTOM_PUBLIC_URL
+        env?.STORAGE_BUCKET,
+        env?.R2_BUCKET_NAME,
+        env?.R2_CUSTOM_PUBLIC_URL
       )
       
       const videoBuffer = await videoResponse.arrayBuffer()
       
       // Upload to storage and get public URL
-      const uploadResult = await storageService.uploadFile(videoBuffer, 'video/mp4', 'video')
-      const publicUrl = uploadResult.url
+      const key = `video_${Date.now()}.mp4`
+      const publicUrl = await storageService.uploadFile(key, videoBuffer, {
+        contentType: 'video/mp4'
+      })
       
       return {
         created: Math.floor(Date.now() / 1000),
@@ -426,7 +461,7 @@ async function generateVertexVideo(
     throw new Error(`Vertex AI request failed: ${errorData}`)
   }
 
-  const data = await response.json()
+  const data = await response.json() as any
 
   if (data.predictions && data.predictions[0]?.bytesBase64Encoded) {
     return {
@@ -438,84 +473,6 @@ async function generateVertexVideo(
     }
   } else {
     throw new Error('No video data in Vertex AI response')
-  }
-}
-
-/**
- * Generate videos using OpenRouter (for Gemini models)
- */
-async function generateOpenRouterVideo(
-  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
-  params: VideoGenerationParams & { model: string },
-  userId: string
-): Promise<VideoGenerationResult> {
-  const providerKey = c.env.OPENROUTER_API_KEY
-  if (!providerKey) {
-    throw new Error('OpenRouter API key not configured')
-  }
-
-  const providerUrl = 'https://openrouter.ai/api/v1/chat/completions'
-
-  const messages: any[] = [{
-    role: 'user',
-    content: params.prompt
-  }]
-
-  // Add image data if available
-  if (params.imagesData && params.imagesData.length > 0) {
-    const imageContent = params.imagesData.map(imageData => {
-      if (imageData.data) {
-        // Convert structured base64 to data URL for OpenRouter
-        return {
-          type: 'image_url',
-          image_url: { url: `data:${imageData.type || 'image/png'};base64,${imageData.data}` }
-        }
-      } else {
-        // Legacy format
-        return {
-          type: 'image_url', 
-          image_url: { url: imageData as any }
-        }
-      }
-    })
-    
-    messages[0].content = [
-      { type: 'text', text: params.prompt },
-      ...imageContent
-    ]
-  }
-
-  const requestBody = {
-    model: params.model,
-    messages: messages,
-    max_tokens: 1000,
-  }
-
-  const response = await fetch(providerUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${providerKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://imagerouter.io',
-      'X-Title': 'ImageRouter'
-    },
-    body: JSON.stringify(requestBody)
-  })
-
-  if (!response.ok) {
-    const errorData = await response.text()
-    throw new Error(`OpenRouter request failed: ${errorData}`)
-  }
-
-  const data = await response.json()
-
-  // OpenRouter returns chat completion format, need to extract videos
-  // This is a simplified implementation
-  if (data.choices?.[0]?.message?.content) {
-    // Parse content for video data - this would need proper implementation
-    throw new Error('OpenRouter video extraction not fully implemented')
-  } else {
-    throw new Error('No content in OpenRouter response')
   }
 }
 
@@ -562,5 +519,181 @@ async function processVideoResult(
   return {
     ...result,
     data: processedData
+  }
+}
+
+/**
+ * Database helper functions for Google operation management
+ */
+
+/**
+ * Find the current video task for a user and prompt
+ */
+async function findCurrentVideoTask(db: any, userId: string, prompt: string) {
+  try {
+    const { apiUsage } = await import('../db/schema')
+    const { eq, and, desc } = await import('drizzle-orm')
+    
+    // Find the most recent video task for this user with this prompt
+    const recentTasks = await db
+      .select()
+      .from(apiUsage)
+      .where(
+        and(
+          eq(apiUsage.userId, userId),
+          eq(apiUsage.prompt, prompt),
+          eq(apiUsage.isAsync, true),
+          eq(apiUsage.taskStatus, 'processing')
+        )
+      )
+      .orderBy(desc(apiUsage.createdAt))
+      .limit(1)
+    
+    return recentTasks[0] || null
+  } catch (error) {
+    console.error('Error finding current video task:', error)
+    return null
+  }
+}
+
+/**
+ * Update task with Google operation metadata
+ */
+async function updateTaskWithOperationData(db: any, taskId: string, operationData: any) {
+  try {
+    const { apiUsage } = await import('../db/schema')
+    const { eq } = await import('drizzle-orm')
+    
+    await db
+      .update(apiUsage)
+      .set({
+        metadata: JSON.stringify({
+          googleOperation: operationData,
+          lastUpdated: Date.now()
+        }),
+        provider: 'google-veo'
+      })
+      .where(eq(apiUsage.taskId, taskId))
+    
+    console.log(`Updated task ${taskId} with Google operation metadata`)
+  } catch (error) {
+    console.error('Error updating task with operation data:', error)
+  }
+}
+
+/**
+ * Update operation status in database
+ */
+async function updateOperationStatus(
+  db: any, 
+  taskId: string, 
+  status: string, 
+  operation?: any, 
+  pollAttempts: number = 0, 
+  error?: any
+) {
+  try {
+    const { apiUsage } = await import('../db/schema')
+    const { eq } = await import('drizzle-orm')
+    
+    // Get current metadata
+    const currentRecord = await db
+      .select()
+      .from(apiUsage)
+      .where(eq(apiUsage.taskId, taskId))
+      .limit(1)
+    
+    if (currentRecord.length === 0) {
+      console.warn(`Task ${taskId} not found for status update`)
+      return
+    }
+    
+    let currentMetadata = {}
+    try {
+      currentMetadata = JSON.parse(currentRecord[0].metadata || '{}')
+    } catch (e) {
+      console.warn('Could not parse existing metadata')
+    }
+    
+    // Update metadata with new status
+    const existingGoogleOp = (currentMetadata as any)?.googleOperation || {}
+    const updatedMetadata = {
+      ...currentMetadata,
+      googleOperation: {
+        ...existingGoogleOp,
+        status,
+        lastPollTime: Date.now(),
+        pollAttempts,
+        operationDone: operation?.done || false,
+        operationData: operation ? {
+          name: operation.name,
+          done: operation.done,
+          error: operation.error || null
+        } : null,
+        error: error ? (error instanceof Error ? error.message : String(error)) : null
+      },
+      lastUpdated: Date.now()
+    }
+    
+    await db
+      .update(apiUsage)
+      .set({
+        metadata: JSON.stringify(updatedMetadata)
+      })
+      .where(eq(apiUsage.taskId, taskId))
+    
+    console.log(`Updated operation status for task ${taskId}: ${status}`)
+  } catch (error) {
+    console.error('Error updating operation status:', error)
+  }
+}
+
+/**
+ * Update polling status in database
+ */
+async function updatePollingStatus(db: any, taskId: string, pollAttempts: number, isDone: boolean) {
+  try {
+    const { apiUsage } = await import('../db/schema')
+    const { eq } = await import('drizzle-orm')
+    
+    // Get current metadata
+    const currentRecord = await db
+      .select()
+      .from(apiUsage)
+      .where(eq(apiUsage.taskId, taskId))
+      .limit(1)
+    
+    if (currentRecord.length === 0) return
+    
+    let currentMetadata = {}
+    try {
+      currentMetadata = JSON.parse(currentRecord[0].metadata || '{}')
+    } catch (e) {
+      console.warn('Could not parse existing metadata for polling update')
+    }
+    
+    // Update polling information
+    const existingGoogleOp = (currentMetadata as any)?.googleOperation || {}
+    const updatedMetadata = {
+      ...currentMetadata,
+      googleOperation: {
+        ...existingGoogleOp,
+        pollAttempts,
+        lastPollTime: Date.now(),
+        operationDone: isDone
+      },
+      lastUpdated: Date.now()
+    }
+    
+    await db
+      .update(apiUsage)
+      .set({
+        metadata: JSON.stringify(updatedMetadata),
+        taskProgress: Math.min(95, 20 + (pollAttempts * 2)) // Gradual progress
+      })
+      .where(eq(apiUsage.taskId, taskId))
+    
+  } catch (error) {
+    console.error('Error updating polling status:', error)
   }
 }
