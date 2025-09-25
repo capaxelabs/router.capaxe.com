@@ -157,7 +157,7 @@ async function processVideoTask(
   taskId: string
 ): Promise<any> {
   // Import video service dynamically
-  const { generateVideo } = await import('./videoService')
+  const { generateVideoAsync } = await import('./videoService')
   
   // Create mock context for the generation service
   const mockContext = {
@@ -181,7 +181,7 @@ async function processVideoTask(
   })
 
   // Run the actual video generation
-  const result = await generateVideo(mockContext, request, userId)
+  const result = await generateVideoAsync(mockContext, request, userId)
 
   // Update progress  
   await queueService.updateTaskProgress(taskId, {
