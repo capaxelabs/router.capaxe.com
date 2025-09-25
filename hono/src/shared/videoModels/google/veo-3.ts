@@ -10,8 +10,8 @@ class Veo3 {
       id: 'google/veo-3',
       providers: [
         {
-          id: 'geminiVideo',
-        model_name: 'gemini-2.0-flash-exp',
+          id: 'gemini',
+        model_name: 'veo-3.0-generate-001',
           pricing: {
             type: PRICING_TYPES.FIXED,
             value: 6,
@@ -24,15 +24,7 @@ class Veo3 {
             type: PRICING_TYPES.FIXED,
             value: 6,
           },
-          // TODO: Implement applyVertexImage function when needed
-          // applyImage: applyVertexImage
-        }, {
-          id: 'replicate',
-          model_name: 'google/veo-3',
-          pricing: {
-            type: PRICING_TYPES.FIXED,
-            value: 6,
-          }
+          applyImage: this.applyImage,
         }
       ],
       arena_score: 1240,

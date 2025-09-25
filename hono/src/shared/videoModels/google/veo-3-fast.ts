@@ -11,7 +11,7 @@ class Veo3Fast {
       providers: [
         {
           id: 'gemini',
-        model_name: 'veo-3.0-generate-001',
+        model_name: 'veo-3.0-fast-generate-001',
           pricing: {
             type: PRICING_TYPES.FIXED,
             value: 3.2,
@@ -24,22 +24,7 @@ class Veo3Fast {
             type: PRICING_TYPES.FIXED,
             value: 3.2,
           },
-          // TODO: Implement applyVertexImage function when needed
-          // applyImage: applyVertexImage
-        }, {
-          id: 'replicate',
-          model_name: 'google/veo-3-fast',
-          pricing: {
-            type: PRICING_TYPES.FIXED,
-            value: 3.2,
-          },
-        }, {
-          id: 'wavespeed',
-          model_name: 'google/veo3-fast', // no audio ?
-          pricing: {
-            type: PRICING_TYPES.FIXED,
-            value: 3.2,
-          },
+          applyImage: this.applyImage,
         }
       ],
       release_date: '2025-06-12'
