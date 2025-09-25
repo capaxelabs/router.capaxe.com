@@ -10,7 +10,11 @@ export interface VideoGenerationParams extends VideoGenerationRequest {
   files?: {
     image?: File[]
   }
-  imagesData?: any[]
+  imagesData?: Array<{
+    data: string
+    type?: string
+    filename?: string
+  }>
 }
 
 export interface VideoGenerationResult {
@@ -254,12 +258,22 @@ async function generateGeminiVideo(
   // Add image for image-to-video
   if (params.imagesData && params.imagesData.length > 0) {
     const imageData = params.imagesData[0]
-    const arrayBuffer = await imageData.blob.arrayBuffer()
-    const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+    let base64Data: string
+    
+    if (imageData.data) {
+      // Use structured base64 data directly
+      base64Data = imageData.data
+    } else if ((imageData as any).blob) {
+      // Fallback for legacy blob format
+      const arrayBuffer = await (imageData as any).blob.arrayBuffer()
+      base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+    } else {
+      throw new Error('Invalid image data format')
+    }
     
     generateOptions.image = {
       bytesBase64Encoded: base64Data,
-      mimeType: imageData.blob.type
+      mimeType: imageData.type || (imageData as any).blob?.type || 'image/png'
     }
     
     generateOptions.personGeneration = 'allow_adult' // Required for image-to-video
@@ -358,7 +372,6 @@ async function handleCompletedOperation(operation: any, providerKey: string) {
     throw new Error('No video URI in completed operation')
   }
 }
-}
 
 /**
  * Generate videos using Google Vertex AI
@@ -440,10 +453,21 @@ async function generateOpenRouterVideo(
 
   // Add image data if available
   if (params.imagesData && params.imagesData.length > 0) {
-    const imageContent = params.imagesData.map(imageData => ({
-      type: 'image_url',
-      image_url: { url: imageData }
-    }))
+    const imageContent = params.imagesData.map(imageData => {
+      if (imageData.data) {
+        // Convert structured base64 to data URL for OpenRouter
+        return {
+          type: 'image_url',
+          image_url: { url: `data:${imageData.type || 'image/png'};base64,${imageData.data}` }
+        }
+      } else {
+        // Legacy format
+        return {
+          type: 'image_url', 
+          image_url: { url: imageData as any }
+        }
+      }
+    })
     
     messages[0].content = [
       { type: 'text', text: params.prompt },

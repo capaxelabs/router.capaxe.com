@@ -1,10 +1,23 @@
 import { Context } from 'hono'
 import { FileUpload } from '../lib/imageHelpers'
 
+export interface ProcessedImageData {
+  base64: string
+  mimeType: string
+  filename: string
+  size: number
+}
+
 export interface ParsedFiles {
   image?: File[]
   mask?: File[]
   [key: string]: File[] | undefined
+}
+
+export interface ProcessedFiles {
+  image?: ProcessedImageData[]
+  mask?: ProcessedImageData[]
+  [key: string]: ProcessedImageData[] | undefined
 }
 
 /**

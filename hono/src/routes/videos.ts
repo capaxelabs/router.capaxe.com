@@ -4,7 +4,7 @@ import { CloudflareBindings, ContextVariables } from '../types/env'
 import { createVideoGenerationHandler } from '../services/generationWrapper'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
-import { parseMultipartFormData, combineFieldsAndFiles } from '../middleware/uploadMiddleware'
+import { parseMultipartFormData } from '../middleware/uploadMiddleware'
 import { VideoGenerationRequest, VideoGenerationResponse, validateVideoRequest } from '../lib/validation'
 import { createQueueService } from '../services/queueService'
 
@@ -20,25 +20,58 @@ const videoGenerationHandler = createVideoGenerationHandler()
 app.post('/generations',
   ipLimiter,
   validateApiKey,
-  // Parse multipart form data if present
+  // Parse multipart form data and convert to base64
   async (c, next) => {
-    if (c.req.header('content-type')?.includes('multipart/form-data')) {
+    const contentType = c.req.header('content-type')
+    
+    if (contentType?.includes('multipart/form-data')) {
       const { fields, files } = await parseMultipartFormData(c)
       
-      // Store parsed data in context
-      c.set('parsedFields', fields)
-      c.set('parsedFiles', files)
+      // Convert files to base64 immediately
+      const processedData = { ...fields }
+      
+      if (files.image && files.image.length > 0) {
+        if (files.image.length === 1) {
+          // Single image
+          const file = files.image[0]
+          const arrayBuffer = await file.arrayBuffer()
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+          processedData.image = {
+            data: base64,
+            type: file.type,
+            filename: file.name
+          }
+        } else {
+          // Multiple images  
+          const imageArray = []
+          for (const file of files.image) {
+            const arrayBuffer = await file.arrayBuffer()
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+            imageArray.push({
+              data: base64,
+              type: file.type,
+              filename: file.name
+            })
+          }
+          processedData.image = imageArray
+        }
+      }
+      
+      // Store processed base64 data in context
+      c.set('processedRequestData', processedData)
+    } else if (contentType?.includes('application/json')) {
+      // For JSON requests, the data is already in the correct format
+      const jsonBody = await c.req.json()
+      c.set('processedRequestData', jsonBody)
     }
     await next()
   },
   validator('json', (value, c) => {
-    // If we have parsed form data, use that instead
-    const parsedFields = c.get('parsedFields')
-    const parsedFiles = c.get('parsedFiles')
+    // If we have processed form data with base64, use that instead
+    const processedRequestData = c.get('processedRequestData')
     
-    if (parsedFields && parsedFiles) {
-      const combinedData = combineFieldsAndFiles(parsedFields, parsedFiles)
-      return validateVideoRequest(combinedData)
+    if (processedRequestData) {
+      return validateVideoRequest(processedRequestData)
     }
     
     return validateVideoRequest(value)
@@ -46,28 +79,39 @@ app.post('/generations',
   async (c) => {
     try {
       const validatedData = c.req.valid('json') as VideoGenerationRequest
-      const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
       
       // Check if async mode is requested
       const isAsync = c.req.query('async') === 'true'
       
-      // Create request with potential file data
+      // Create request with potential file data or base64 data
       const requestData: any = { ...validatedData }
-
-      // Process uploaded images if present (for image-to-video)
-      if (parsedFiles?.image && parsedFiles.image.length > 0) {
-        const imagesData = []
-        for (const imageFile of parsedFiles.image) {
-          imagesData.push({
+      
+      // Convert structured base64 image data to imagesData format
+      if (validatedData.image) {
+        if (typeof validatedData.image === 'object' && !Array.isArray(validatedData.image) && 'data' in validatedData.image) {
+          // Single structured base64 image
+          requestData.imagesData = [validatedData.image]
+        } else if (Array.isArray(validatedData.image) && validatedData.image[0] && typeof validatedData.image[0] === 'object' && 'data' in validatedData.image[0]) {
+          // Multiple structured base64 images
+          requestData.imagesData = validatedData.image
+        }
+        // Remove the raw image field to avoid confusion
+        delete requestData.image
+      }
+      
+      // Process uploaded files (fallback for legacy multipart uploads)
+      const legacyFiles = c.get('parsedFiles')
+      if (legacyFiles?.image && legacyFiles.image.length > 0 && !requestData.imagesData) {
+        const legacyImagesData = []
+        for (const imageFile of legacyFiles.image) {
+          legacyImagesData.push({
             blob: imageFile,
             filename: imageFile.name || 'image.png'
           })
         }
-        
-        // Add images data to the request
-        requestData.imagesData = imagesData
-        requestData.files = parsedFiles
+        requestData.imagesData = legacyImagesData
+        requestData.files = legacyFiles
       }
 
       if (isAsync) {

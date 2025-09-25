@@ -21,10 +21,24 @@ export const BaseImageRequestSchema = z.object({
   user: z.string().optional()
 })
 
-// Image generation with optional image input
+// Base64 image data schema
+const Base64ImageSchema = z.object({
+  data: z.string().min(1, 'Base64 image data required'),
+  type: z.string().optional(), // MIME type, e.g., 'image/png'
+  filename: z.string().optional()
+})
+
+// Image generation with base64 image inputs (preferred method)
 export const ImageGenerationRequestSchema = BaseImageRequestSchema.extend({
-  image: z.string().optional(), // Base64 or URL
-  mask: z.string().optional()   // Base64 or URL
+  image: z.union([
+    z.string(),  // Legacy: Base64 string or URL
+    Base64ImageSchema, // Preferred: Structured base64 object
+    z.array(Base64ImageSchema) // Multiple images
+  ]).optional(),
+  mask: z.union([
+    z.string(),  // Legacy: Base64 string or URL  
+    Base64ImageSchema // Structured base64 object
+  ]).optional()
 })
 
 // Video generation request schema
@@ -37,7 +51,11 @@ export const VideoGenerationRequestSchema = z.object({
   fps: z.number().int().min(12).max(60).default(24),
   response_format: z.enum(['url', 'b64_json']).default('url'),
   user: z.string().optional(),
-  image: z.string().optional() // Base64 or URL for image-to-video
+  image: z.union([
+    z.string(),  // Legacy: Base64 string or URL
+    Base64ImageSchema, // Preferred: Structured base64 object  
+    z.array(Base64ImageSchema) // Multiple images for video
+  ]).optional()
 })
 
 // Model list response schema

@@ -12,7 +12,11 @@ export interface ImageGenerationParams extends ImageGenerationRequest {
     image?: File[]
     mask?: File[]
   }
-  imagesData?: any[]
+  imagesData?: Array<{
+    data: string
+    type?: string
+    filename?: string
+  }>
 }
 
 export interface GenerationResult {
@@ -124,14 +128,25 @@ async function generateGemini(
   // Add image data if available (for image editing)
   if (params.imagesData && params.imagesData.length > 0) {
     for (const imageData of params.imagesData) {
-      const arrayBuffer = await imageData.blob.arrayBuffer()
-      const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-      parts.push({
-        inline_data: {
-          mime_type: imageData.blob.type,
-          data: base64Data
-        }
-      })
+      if (imageData.data) {
+        // Use the structured base64 data directly
+        parts.push({
+          inline_data: {
+            mime_type: imageData.type || 'image/png',
+            data: imageData.data
+          }
+        })
+      } else if ((imageData as any).blob) {
+        // Fallback for legacy blob format
+        const arrayBuffer = await (imageData as any).blob.arrayBuffer()
+        const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+        parts.push({
+          inline_data: {
+            mime_type: (imageData as any).blob.type,
+            data: base64Data
+          }
+        })
+      }
     }
   }
 

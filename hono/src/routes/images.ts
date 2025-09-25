@@ -6,6 +6,7 @@ import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
 import { parseMultipartFormData, combineFieldsAndFiles } from '../middleware/uploadMiddleware'
 import { ImageGenerationRequest, ImageGenerationResponse, validateImageRequest } from '../lib/validation'
+import type { NewApiUsage } from '../db/schema'
 import { createQueueService } from '../services/queueService'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
@@ -20,25 +21,69 @@ const imageGenerationHandler = createImageGenerationHandler()
 app.post('/generations', 
   ipLimiter,
   validateApiKey,
-  // Parse multipart form data
+  // Parse multipart form data and convert to base64
   async (c, next) => {
-    if (c.req.header('content-type')?.includes('multipart/form-data')) {
+    const contentType = c.req.header('content-type')
+    
+    if (contentType?.includes('multipart/form-data')) {
       const { fields, files } = await parseMultipartFormData(c)
       
-      // Store parsed data in context
-      c.set('parsedFields', fields)
-      c.set('parsedFiles', files)
+      // Convert files to base64 immediately
+      const processedData = { ...fields }
+      
+      if (files.image && files.image.length > 0) {
+        if (files.image.length === 1) {
+          // Single image
+          const file = files.image[0]
+          const arrayBuffer = await file.arrayBuffer()
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+          processedData.image = {
+            data: base64,
+            type: file.type,
+            filename: file.name
+          }
+        } else {
+          // Multiple images  
+          const imageArray = []
+          for (const file of files.image) {
+            const arrayBuffer = await file.arrayBuffer()
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+            imageArray.push({
+              data: base64,
+              type: file.type,
+              filename: file.name
+            })
+          }
+          processedData.image = imageArray
+        }
+      }
+      
+      if (files.mask && files.mask.length > 0) {
+        const file = files.mask[0]
+        const arrayBuffer = await file.arrayBuffer()
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+        processedData.mask = {
+          data: base64,
+          type: file.type,
+          filename: file.name
+        }
+      }
+      
+      // Store processed base64 data in context
+      c.set('processedRequestData', processedData)
+    } else if (contentType?.includes('application/json')) {
+      // For JSON requests, the data is already in the correct format
+      const jsonBody = await c.req.json()
+      c.set('processedRequestData', jsonBody)
     }
     await next()
   },
   validator('json', (value, c) => {
-    // If we have parsed form data, use that instead
-    const parsedFields = c.get('parsedFields')
-    const parsedFiles = c.get('parsedFiles')
+    // If we have processed form data with base64, use that instead
+    const processedRequestData = c.get('processedRequestData')
     
-    if (parsedFields && parsedFiles) {
-      const combinedData = combineFieldsAndFiles(parsedFields, parsedFiles)
-      return validateImageRequest(combinedData)
+    if (processedRequestData) {
+      return validateImageRequest(processedRequestData)
     }
     
     return validateImageRequest(value)
@@ -52,8 +97,21 @@ app.post('/generations',
       // Check if async mode is requested
       const isAsync = c.req.query('async') === 'true'
       
-      // Create request with potential file data
+      // Create request with potential file data or base64 data
       const requestData: any = { ...validatedData }
+      
+      // Convert structured base64 image data to imagesData format
+      if (validatedData.image) {
+        if (typeof validatedData.image === 'object' && !Array.isArray(validatedData.image) && 'data' in validatedData.image) {
+          // Single structured base64 image
+          requestData.imagesData = [validatedData.image]
+        } else if (Array.isArray(validatedData.image) && validatedData.image[0] && typeof validatedData.image[0] === 'object' && 'data' in validatedData.image[0]) {
+          // Multiple structured base64 images
+          requestData.imagesData = validatedData.image
+        }
+        // Remove the raw image field to avoid confusion
+        delete requestData.image
+      }
       
       if (parsedFiles) {
         requestData.files = parsedFiles
@@ -89,7 +147,7 @@ app.post('/generations',
             const db = c.get('db')
             if (db) {
               const { generateTaskId } = await import('../services/taskIdGenerator')
-              const { apiUsage, NewApiUsage } = await import('../db/schema')
+              const { apiUsage } = await import('../db/schema')
               
               const taskId = generateTaskId('image', authenticatedUser!.id)
               const errorUsage: NewApiUsage = {
@@ -192,7 +250,7 @@ app.post('/edits',
     c.set('parsedFiles', files)
     await next()
   },
-  validator('json', (value, c) => {
+  validator('json', (_, c) => {
     const parsedFields = c.get('parsedFields')
     const parsedFiles = c.get('parsedFiles')
     
@@ -217,22 +275,39 @@ app.post('/edits',
       // Check if async mode is requested
       const isAsync = c.req.query('async') === 'true'
 
-      // Process uploaded images
-      const imagesData = []
+      // Create request with potential file data or base64 data
+      const requestWithImages: any = { ...validatedData }
+      
+      // Convert structured base64 image data to imagesData format
+      if (validatedData.image) {
+        if (typeof validatedData.image === 'object' && !Array.isArray(validatedData.image) && 'data' in validatedData.image) {
+          // Single structured base64 image
+          requestWithImages.imagesData = [validatedData.image]
+        } else if (Array.isArray(validatedData.image) && validatedData.image[0] && typeof validatedData.image[0] === 'object' && 'data' in validatedData.image[0]) {
+          // Multiple structured base64 images
+          requestWithImages.imagesData = validatedData.image
+        }
+        // Remove the raw image field to avoid confusion
+        delete requestWithImages.image
+      }
+
+      // Process uploaded files (fallback for multipart uploads)
+      const legacyImagesData = []
       if (parsedFiles?.image) {
         for (const imageFile of parsedFiles.image) {
-          imagesData.push({
+          legacyImagesData.push({
             blob: imageFile,
             filename: imageFile.name || 'image.png'
           })
         }
+        // If we have legacy file uploads and no base64 data, use legacy format
+        if (!requestWithImages.imagesData) {
+          requestWithImages.imagesData = legacyImagesData
+        }
       }
 
-      // Add images data to the request
-      const requestWithImages: any = {
-        ...validatedData,
-        files: parsedFiles,
-        imagesData
+      if (parsedFiles) {
+        requestWithImages.files = parsedFiles
       }
 
       if (isAsync) {

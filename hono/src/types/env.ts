@@ -41,6 +41,7 @@ export interface ContextVariables {
     mask?: File[]
     [key: string]: File[] | undefined
   }
+  processedRequestData?: Record<string, any>
   db?: any
   secureHeadersNonce?: string
   authenticatedUser?: {

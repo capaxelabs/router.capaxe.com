@@ -26,14 +26,19 @@ This directory contains comprehensive API documentation for the ImageRouter API 
 
 ### Image Generation
 - **Generate Image - Gemini** - Create images using Gemini models
-- **Generate Image - Imagen** - Create images using Imagen models
+- **Generate Image - Imagen** - Create images using Imagen models  
 - **Generate Image - Base64 Response** - Get images as base64 strings
+- **Generate Image - Base64 Input** - ⭐ NEW: Generate/edit images using base64 input
 - **Generate Multiple Images** - Create multiple images in one request
+- **Generate Multiple Images - Base64** - ⭐ NEW: Batch processing with base64 inputs
 - **Edit Image - Multipart** - Edit existing images with file upload
+- **Edit Image - Base64 Input** - ⭐ NEW: Edit images using base64 data
 
 ### Video Generation
 - **Generate Video - Veo** - Create videos using Veo models
 - **Generate Video - Image to Video** - Animate static images into videos
+- **Generate Video - Base64 Input** - ⭐ NEW: Generate videos using base64 input images
+- **Video Generation - Multiple Images** - ⭐ NEW: Advanced multi-image video generation
 - **Video Proxy** - Internal proxy for serving Google-hosted videos
 
 ### Error Examples
@@ -86,7 +91,7 @@ Currently, the API doesn't require authentication for testing, but in production
 
 ## 🛠️ Request Parameters
 
-### Image Generation
+### Image Generation (Text-to-Image)
 ```json
 {
   "model": "google/imagen-3-fast",
@@ -99,7 +104,46 @@ Currently, the API doesn't require authentication for testing, but in production
 }
 ```
 
-### Video Generation
+### Image Generation with Base64 Input (NEW!)
+```json
+{
+  "model": "google/gemini-2.5-flash",
+  "prompt": "Transform this image into a painting",
+  "image": {
+    "data": "iVBORw0KGgoAAAANS...",     // Base64 image data (no data:image/ prefix)
+    "type": "image/png",              // MIME type
+    "filename": "input.png"           // Optional filename
+  },
+  "n": 1,
+  "size": "1024x1024", 
+  "quality": "high",
+  "response_format": "url"
+}
+```
+
+### Multiple Base64 Images
+```json
+{
+  "model": "google/gemini-2.5-flash", 
+  "prompt": "Create variations using these reference images",
+  "image": [
+    {
+      "data": "iVBORw0KGgoAAAANS...",
+      "type": "image/png",
+      "filename": "ref1.png"
+    },
+    {
+      "data": "/9j/4AAQSkZJRgABAQ...", 
+      "type": "image/jpeg",
+      "filename": "ref2.jpg"
+    }
+  ],
+  "n": 4,
+  "response_format": "url"
+}
+```
+
+### Video Generation (Text-to-Video)
 ```json
 {
   "model": "google/veo-3-fast",
@@ -109,6 +153,46 @@ Currently, the API doesn't require authentication for testing, but in production
   "size": "1280x720",            // Video dimensions or "auto"
   "quality": "high",              // Video quality
   "response_format": "url"        // Response format
+}
+```
+
+### Video Generation with Base64 Input (NEW!)
+```json
+{
+  "model": "google/veo-3-fast",
+  "prompt": "Animate this image with flowing motion",
+  "image": {
+    "data": "iVBORw0KGgoAAAANS...",     // Base64 image data (no data:image/ prefix)
+    "type": "image/png",              // MIME type
+    "filename": "input.png"           // Optional filename
+  },
+  "duration": 6,
+  "fps": 30,
+  "size": "1920x1080",
+  "response_format": "url"
+}
+```
+
+### Multiple Images for Video (Advanced)
+```json
+{
+  "model": "google/veo-3-fast",
+  "prompt": "Create transitions between these scenes",
+  "image": [
+    {
+      "data": "iVBORw0KGgoAAAANS...",
+      "type": "image/png",
+      "filename": "scene1.png"
+    },
+    {
+      "data": "/9j/4AAQSkZJRgABAQ...",
+      "type": "image/jpeg", 
+      "filename": "scene2.jpg"
+    }
+  ],
+  "duration": 10,
+  "fps": 24,
+  "response_format": "url"
 }
 ```
 
@@ -157,20 +241,95 @@ Currently, the API doesn't require authentication for testing, but in production
 - **Image/Video Generation**: 6000 requests per minute per IP
 - **Rate limit headers** included in responses
 
-## 🔄 File Uploads
+## 🔄 Image Input Methods
 
-For image editing and image-to-video generation, use multipart form data:
+### Method 1: Base64 JSON (Recommended ⭐)
+Most efficient method with direct base64 data in JSON requests:
+
+```json
+{
+  "model": "google/gemini-2.5-flash",
+  "prompt": "Edit instruction",
+  "image": {
+    "data": "base64-encoded-image-data",
+    "type": "image/png",
+    "filename": "optional-name.png"
+  }
+}
+```
+
+**Benefits:**
+- ✅ Faster processing (no file conversion overhead)
+- ✅ Direct LLM compatibility  
+- ✅ Better for programmatic usage
+- ✅ Supports multiple images in single request
+- ✅ Works with async processing
+
+### Method 2: Multipart Form Upload (Legacy)
+Traditional file upload method for compatibility:
 
 ```
 Content-Type: multipart/form-data
 
 Fields:
 - model: Model identifier
-- prompt: Text description
+- prompt: Text description  
 - image: Image file (JPEG, PNG, WebP, GIF up to 20MB)
 - mask: Optional mask file for selective editing (up to 10MB)
 - [other parameters as form fields]
 ```
+
+**Note:** Files are automatically converted to base64 internally.
+
+## 💡 Base64 Best Practices
+
+### Preparing Base64 Data
+```javascript
+// Browser/Node.js example
+const fileInput = document.getElementById('file');
+const file = fileInput.files[0];
+const reader = new FileReader();
+
+reader.onload = function(e) {
+  const base64Data = e.target.result.split(',')[1]; // Remove data:image/... prefix
+  
+  const requestBody = {
+    model: "google/gemini-2.5-flash",
+    prompt: "Transform this image",
+    image: {
+      data: base64Data,
+      type: file.type,
+      filename: file.name
+    }
+  };
+};
+reader.readAsDataURL(file);
+```
+
+### Python Example
+```python
+import base64
+
+with open('image.jpg', 'rb') as f:
+    base64_data = base64.b64encode(f.read()).decode('utf-8')
+
+request_data = {
+    "model": "google/gemini-2.5-flash",
+    "prompt": "Edit this image",
+    "image": {
+        "data": base64_data,
+        "type": "image/jpeg",
+        "filename": "image.jpg"
+    }
+}
+```
+
+### Performance Tips
+- ✅ Use base64 method for programmatic/API usage
+- ✅ Remove data:image/... prefix from base64 strings
+- ✅ Include proper MIME type for better processing
+- ✅ Use async=true query parameter for long operations
+- ❌ Don't use multipart upload for high-volume applications
 
 ## 🧪 Testing
 
@@ -230,6 +389,71 @@ Run tests by executing requests in Bruno. Test scripts will automatically valida
 }
 ```
 **Solution**: Use valid model IDs from the models list endpoint
+
+## 🔄 Migration Guide: Multipart → Base64
+
+### Before (Multipart Upload)
+```bash
+curl -X POST https://imagerouter.capaxe.com/v1/openai/images/edits \
+  -F "model=google/gemini-2.5-flash" \
+  -F "prompt=Add a red hat" \
+  -F "image=@photo.jpg"
+```
+
+### After (Base64 JSON - Recommended)
+```bash
+# Convert image to base64 first
+BASE64_DATA=$(base64 -i photo.jpg)
+
+curl -X POST https://imagerouter.capaxe.com/v1/openai/images/edits \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "google/gemini-2.5-flash",
+    "prompt": "Add a red hat",
+    "image": {
+      "data": "'$BASE64_DATA'",
+      "type": "image/jpeg",
+      "filename": "photo.jpg"
+    }
+  }'
+```
+
+### Video Generation Migration
+
+**Before (Multipart Upload):**
+```bash
+curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations \
+  -F "model=google/veo-3-fast" \
+  -F "prompt=Animate this image" \
+  -F "image=@reference.jpg" \
+  -F "duration=5"
+```
+
+**After (Base64 JSON - Recommended):**
+```bash
+BASE64_DATA=$(base64 -i reference.jpg)
+
+curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations?async=true \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "google/veo-3-fast",
+    "prompt": "Animate this image with smooth motion",
+    "image": {
+      "data": "'$BASE64_DATA'",
+      "type": "image/jpeg",
+      "filename": "reference.jpg"
+    },
+    "duration": 5,
+    "fps": 24
+  }'
+```
+
+### Migration Benefits
+- **2-3x faster processing** due to eliminated file I/O
+- **Better async support** with queue-based processing
+- **Reduced server load** and memory usage
+- **Improved scalability** for high-volume applications
+- **Enhanced reliability** with fewer moving parts
 
 ## 📚 Additional Resources
 
