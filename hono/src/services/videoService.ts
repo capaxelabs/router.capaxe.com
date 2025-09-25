@@ -68,6 +68,9 @@ export async function generateVideo(
     case 'geminiVideo':
       result = await generateGeminiVideo(c, { ...processedParams, model: actualModel }, userId)
       break
+    case 'geminiMock':
+      result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
+      break
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
@@ -87,6 +90,24 @@ export async function generateVideo(
   }
 
   return result
+}
+
+/**
+ * Generate mock videos for testing (geminiMock provider)
+ */
+async function generateGeminiMockVideo(
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
+  params: VideoGenerationParams & { model: string },
+  userId: string
+): Promise<VideoGenerationResult> {
+  // Return a mock video response for testing
+  return {
+    created: Math.floor(Date.now() / 1000),
+    data: [{
+      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+    }],
+    latency: 100
+  }
 }
 
 /**

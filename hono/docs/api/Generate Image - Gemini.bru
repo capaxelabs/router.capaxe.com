@@ -5,20 +5,26 @@ meta {
 }
 
 post {
-  url: {{APP_URL}}/v1/openai/images/generations
+  url: {{APP_URL}}/v1/openai/images/generations?async=true
   body: json
   auth: none
+}
+
+params:query {
+  async: true
 }
 
 body:json {
   {
     "model": "google/gemini-2.5-flash",
-    "prompt": "A beautiful sunset over mountains, digital art style, high quality, vibrant colors",
+    "prompt": "A cat playing with a ball of yarn",
     "n": 1,
     "size": "1024x1024",
     "quality": "high",
     "response_format": "url"
   }
+  
+  
 }
 
 tests {

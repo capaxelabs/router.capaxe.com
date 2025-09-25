@@ -57,7 +57,7 @@ async function processQueueMessage(
     await queueService.updateTaskProgress(taskId, {
       taskStatus: 'processing',
       taskProgress: 10,
-      taskStartedAt: new Date()
+      taskStartedAt: Date.now()
     })
 
     // Process based on task type

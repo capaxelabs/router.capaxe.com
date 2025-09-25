@@ -10,7 +10,7 @@
   "vars": {
     "ENVIRONMENT": "development",
     "R2_BUCKET_NAME": "imagerouter",
-    "R2_CUSTOM_PUBLIC_URL": "https://81cac75fe318d80f4344481afc4799ac.r2.cloudflarestorage.com"
+    "R2_CUSTOM_PUBLIC_URL": "https://storage.shootflo.com"
   },
   "r2_buckets": [
     {

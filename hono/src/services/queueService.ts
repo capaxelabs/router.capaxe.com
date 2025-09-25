@@ -97,8 +97,8 @@ export class QueueService {
       taskProgress?: number
       provider?: string
       error?: string
-      taskStartedAt?: Date
-      taskCompletedAt?: Date
+      taskStartedAt?: Date | string | number
+      taskCompletedAt?: Date | string | number
     }
   ): Promise<void> {
     const updateData: any = {}
@@ -107,8 +107,28 @@ export class QueueService {
     if (updates.taskProgress !== undefined) updateData.taskProgress = updates.taskProgress
     if (updates.provider) updateData.provider = updates.provider
     if (updates.error) updateData.error = updates.error
-    if (updates.taskStartedAt) updateData.taskStartedAt = Math.floor(updates.taskStartedAt.getTime() / 1000)
-    if (updates.taskCompletedAt) updateData.taskCompletedAt = Math.floor(updates.taskCompletedAt.getTime() / 1000)
+    if (updates.taskStartedAt) {
+      let date: Date
+      if (updates.taskStartedAt instanceof Date) {
+        date = updates.taskStartedAt
+      } else if (typeof updates.taskStartedAt === 'number') {
+        date = new Date(updates.taskStartedAt)
+      } else {
+        date = new Date(updates.taskStartedAt)
+      }
+      updateData.taskStartedAt = date
+    }
+    if (updates.taskCompletedAt) {
+      let date: Date
+      if (updates.taskCompletedAt instanceof Date) {
+        date = updates.taskCompletedAt
+      } else if (typeof updates.taskCompletedAt === 'number') {
+        date = new Date(updates.taskCompletedAt)
+      } else {
+        date = new Date(updates.taskCompletedAt)
+      }
+      updateData.taskCompletedAt = date
+    }
 
     await this.db
       .update(apiUsage)
@@ -137,7 +157,7 @@ export class QueueService {
       .set({
         taskStatus: result.status === 'success' ? 'completed' : 'failed',
         taskProgress: result.status === 'success' ? 100 : 0,
-        taskCompletedAt: Math.floor(Date.now() / 1000),
+        taskCompletedAt: new Date(),
         outputUrls: JSON.stringify(result.outputUrls),
         cost: result.cost,
         speedMs: result.speedMs,

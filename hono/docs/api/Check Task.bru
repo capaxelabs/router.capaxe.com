@@ -1,0 +1,19 @@
+meta {
+  name: Check Task
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{APP_URL}}/v1/tasks/img_1758773371_m1njlh_9w3bvq
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer test-api-key-1234567890abcdef1234567890abcdef1234567890abcdef123
+}
+
+settings {
+  encodeUrl: true
+}
