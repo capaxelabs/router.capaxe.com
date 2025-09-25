@@ -1,0 +1,233 @@
+meta {
+  name: Base64 Conversion Examples
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{APP_URL}}/v1/models
+  body: none
+  auth: none
+}
+
+tests {
+  test("This is a documentation-only request", function() {
+    // This request is just for documentation purposes
+    expect(true).to.equal(true);
+  });
+}
+
+docs {
+  # Base64 Image Conversion Examples
+  
+  This documentation shows how to convert different image formats to the base64 structure
+  required by the new optimized API endpoints.
+  
+  ## Required Format
+  
+  The API expects base64 images in this structured format:
+  
+  ```json
+  {
+    "image": {
+      "data": "base64-encoded-data-without-prefix",
+      "type": "image/png",
+      "filename": "optional-name.png"
+    }
+  }
+  ```
+  
+  **Important**: Remove the "data:image/png;base64," prefix from base64 strings!
+  
+  ## JavaScript/Browser Examples
+  
+  ### From File Input
+  ```javascript
+  function convertFileToBase64(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        const base64Data = dataUrl.split(',')[1]; // Remove data:image/...;base64, prefix
+        
+        resolve({
+          data: base64Data,
+          type: file.type,
+          filename: file.name
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  
+  // Usage
+  const fileInput = document.getElementById('imageFile');
+  const imageObject = await convertFileToBase64(fileInput.files[0]);
+  ```
+  
+  ### From Canvas
+  ```javascript
+  function canvasToBase64Object(canvas, filename = 'canvas.png') {
+    const dataUrl = canvas.toDataURL('image/png');
+    const base64Data = dataUrl.split(',')[1];
+    
+    return {
+      data: base64Data,
+      type: 'image/png',
+      filename: filename
+    };
+  }
+  ```
+  
+  ### From URL (with fetch)
+  ```javascript
+  async function urlToBase64Object(imageUrl, filename) {
+    const response = await fetch(imageUrl);
+    const blob = await response.blob();
+    
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result.split(',')[1];
+        resolve({
+          data: base64Data,
+          type: blob.type,
+          filename: filename || 'image.jpg'
+        });
+      };
+      reader.readAsDataURL(blob);
+    });
+  }
+  ```
+  
+  ## Python Examples
+  
+  ### From File
+  ```python
+  import base64
+  import mimetypes
+  
+  def file_to_base64_object(file_path):
+      with open(file_path, 'rb') as f:
+          base64_data = base64.b64encode(f.read()).decode('utf-8')
+      
+      mime_type, _ = mimetypes.guess_type(file_path)
+      filename = file_path.split('/')[-1]
+      
+      return {
+          "data": base64_data,
+          "type": mime_type or "image/jpeg",
+          "filename": filename
+      }
+  ```
+  
+  ### From PIL Image
+  ```python
+  from PIL import Image
+  import base64
+  import io
+  
+  def pil_to_base64_object(pil_image, format='PNG', filename='image.png'):
+      buffer = io.BytesIO()
+      pil_image.save(buffer, format=format)
+      base64_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+      
+      return {
+          "data": base64_data,
+          "type": f"image/{format.lower()}",
+          "filename": filename
+      }
+  ```
+  
+  ### From URL
+  ```python
+  import requests
+  import base64
+  
+  def url_to_base64_object(url, filename=None):
+      response = requests.get(url)
+      base64_data = base64.b64encode(response.content).decode('utf-8')
+      
+      content_type = response.headers.get('content-type', 'image/jpeg')
+      if not filename:
+          filename = url.split('/')[-1] or 'image.jpg'
+      
+      return {
+          "data": base64_data,
+          "type": content_type,
+          "filename": filename
+      }
+  ```
+  
+  ## Node.js Examples
+  
+  ### From Buffer
+  ```javascript
+  function bufferToBase64Object(buffer, mimeType, filename) {
+    return {
+      data: buffer.toString('base64'),
+      type: mimeType,
+      filename: filename
+    };
+  }
+  ```
+  
+  ### From File System
+  ```javascript
+  const fs = require('fs');
+  const path = require('path');
+  
+  function fileToBase64Object(filePath) {
+    const buffer = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    
+    const mimeTypes = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg', 
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp'
+    };
+    
+    return {
+      data: buffer.toString('base64'),
+      type: mimeTypes[ext] || 'image/jpeg',
+      filename: path.basename(filePath)
+    };
+  }
+  ```
+  
+  ## Common Mistakes to Avoid
+  
+  ❌ **Don't include the data URL prefix:**
+  ```json
+  {
+    "data": "data:image/png;base64,iVBORw0KGgo..."  // WRONG
+  }
+  ```
+  
+  ✅ **Correct format:**
+  ```json
+  {
+    "data": "iVBORw0KGgoAAAANSUhEUgAA..."  // CORRECT
+  }
+  ```
+  
+  ❌ **Don't forget the structure:**
+  ```json
+  {
+    "image": "base64-string"  // WRONG - old format
+  }
+  ```
+  
+  ✅ **Use the proper structure:**
+  ```json
+  {
+    "image": {
+      "data": "base64-string",
+      "type": "image/png",
+      "filename": "image.png"
+    }
+  }
+  ```
+}

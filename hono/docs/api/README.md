@@ -4,6 +4,13 @@ This directory contains comprehensive API documentation for the ImageRouter API 
 
 ## 🚀 Getting Started
 
+### ⚡ IMPORTANT: Async is Now Default!
+
+**Major Change**: All image and video generation endpoints now default to **asynchronous processing**. Requests return a task ID for status tracking instead of waiting for completion.
+
+- **Default Behavior**: Returns task ID immediately → Use `/v1/tasks/{taskId}` to check status
+- **Synchronous Mode**: Add `?sync=true` query parameter for immediate results (legacy behavior)
+
 ### Prerequisites
 - [Bruno](https://www.usebruno.com/) - Download from the official website
 - ImageRouter API running locally or access to production endpoint
@@ -25,20 +32,21 @@ This directory contains comprehensive API documentation for the ImageRouter API 
 - **Models HTML Viewer** - Interactive web interface for browsing models
 
 ### Image Generation
-- **Generate Image - Gemini** - Create images using Gemini models
-- **Generate Image - Imagen** - Create images using Imagen models  
+- **Generate Image - Gemini** - Create images using Gemini models (⚡ ASYNC DEFAULT)
+- **Generate Image - Imagen** - Create images using Imagen models (⚡ ASYNC DEFAULT)
+- **Generate Image - Sync Mode** - ⭐ NEW: Synchronous processing with ?sync=true
 - **Generate Image - Base64 Response** - Get images as base64 strings
 - **Generate Image - Base64 Input** - ⭐ NEW: Generate/edit images using base64 input
 - **Generate Multiple Images** - Create multiple images in one request
 - **Generate Multiple Images - Base64** - ⭐ NEW: Batch processing with base64 inputs
-- **Edit Image - Multipart** - Edit existing images with file upload
-- **Edit Image - Base64 Input** - ⭐ NEW: Edit images using base64 data
+- **Edit Image - Multipart** - Edit existing images with file upload (⚡ ASYNC DEFAULT)
+- **Edit Image - Base64 Input** - ⭐ NEW: Edit images using base64 data (⚡ ASYNC DEFAULT)
 
 ### Video Generation
-- **Generate Video - Veo** - Create videos using Veo models
-- **Generate Video - Image to Video** - Animate static images into videos
-- **Generate Video - Base64 Input** - ⭐ NEW: Generate videos using base64 input images
-- **Video Generation - Multiple Images** - ⭐ NEW: Advanced multi-image video generation
+- **Generate Video - Veo** - Create videos using Veo models (⚡ ASYNC DEFAULT)
+- **Generate Video - Image to Video** - Animate static images into videos (⚡ ASYNC DEFAULT)
+- **Generate Video - Base64 Input** - ⭐ NEW: Generate videos using base64 input images (⚡ ASYNC DEFAULT)
+- **Video Generation - Multiple Images** - ⭐ NEW: Advanced multi-image video generation (⚡ ASYNC DEFAULT)
 - **Video Proxy** - Internal proxy for serving Google-hosted videos
 
 ### Error Examples
@@ -88,6 +96,19 @@ Currently, the API doesn't require authentication for testing, but in production
 - `google/veo-2` - Standard Veo video model
 - `google/veo-3` - Latest Veo model
 - `google/veo-3-fast` - Optimized for speed
+
+## ⚡ Async-First API Workflow
+
+### Default Async Workflow (Recommended)
+1. **Submit Request**: `POST /v1/openai/images/generations` (no query params needed)
+2. **Receive Task ID**: Get immediate response with `taskId`, `status: "pending"`
+3. **Check Status**: `GET /v1/tasks/{taskId}` (requires Authorization header)
+4. **Get Results**: When `status: "completed"`, retrieve generated content
+
+### Legacy Sync Workflow
+1. **Submit Request**: `POST /v1/openai/images/generations?sync=true`
+2. **Wait for Response**: Request blocks until generation completes
+3. **Get Results**: Image data returned directly in response
 
 ## 🛠️ Request Parameters
 
@@ -198,7 +219,37 @@ Currently, the API doesn't require authentication for testing, but in production
 
 ## 📝 Response Formats
 
-### Successful Image Generation
+### Async Response (Default Behavior)
+```json
+{
+  "taskId": "img_1758773371_m1njlh_9w3bvq",
+  "status": "pending",
+  "type": "image", 
+  "createdAt": 1640995200123,
+  "message": "Image generation task created. Use GET /v1/tasks/:taskId to check status."
+}
+```
+
+### Task Status Check (`GET /v1/tasks/{taskId}`)
+```json
+{
+  "taskId": "img_1758773371_m1njlh_9w3bvq",
+  "status": "completed",
+  "progress": 100,
+  "result": {
+    "created": 1640995200,
+    "data": [
+      {
+        "url": "https://storage-url/image.png",
+        "revised_prompt": "Enhanced prompt used"
+      }
+    ],
+    "cost": 0.0272
+  }
+}
+```
+
+### Sync Response (with ?sync=true)
 ```json
 {
   "created": 1640995200,
@@ -207,7 +258,8 @@ Currently, the API doesn't require authentication for testing, but in production
       "url": "https://storage-url/image.png",
       "revised_prompt": "Enhanced prompt used"
     }
-  ]
+  ],
+  "cost": 0.0272
 }
 ```
 
@@ -449,11 +501,18 @@ curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations?async=t
 ```
 
 ### Migration Benefits
-- **2-3x faster processing** due to eliminated file I/O
-- **Better async support** with queue-based processing
-- **Reduced server load** and memory usage
-- **Improved scalability** for high-volume applications
-- **Enhanced reliability** with fewer moving parts
+- **⚡ Async-First Processing**: No more timeouts or blocking requests
+- **📊 Task Status Tracking**: Monitor generation progress in real-time  
+- **🔄 Better User Experience**: Immediate response with background processing
+- **📈 Improved Scalability**: Handle high-volume requests efficiently
+- **🛡️ Enhanced Reliability**: Queue-based system with retry logic
+- **💾 Reduced Memory Usage**: No long-running connections
+- **🎯 Base64 Optimization**: 2-3x faster with direct base64 processing
+
+### ⚠️ Breaking Changes
+- **Default behavior changed**: All endpoints now return task IDs by default
+- **Sync mode requires parameter**: Add `?sync=true` for old behavior
+- **Task checking requires auth**: Use Authorization header for `/v1/tasks/{taskId}`
 
 ## 📚 Additional Resources
 

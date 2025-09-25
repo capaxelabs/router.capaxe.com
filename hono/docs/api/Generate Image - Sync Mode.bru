@@ -1,0 +1,82 @@
+meta {
+  name: Generate Image - Sync Mode
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations?sync=true
+  body: json
+  auth: none
+}
+
+params:query {
+  sync: true
+}
+
+body:json {
+  {
+    "model": "google/gemini-2.5-flash",
+    "prompt": "A serene mountain landscape at sunset",
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "high",
+    "response_format": "url"
+  }
+}
+
+tests {
+  test("Should return image data directly (not a task)", function() {
+    if (res.getStatus() === 200) {
+      expect(res.getBody().data).to.be.an('array');
+      expect(res.getBody()).to.not.have.property('taskId');
+      expect(res.getBody().data[0]).to.have.property('url');
+    }
+  });
+  
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+}
+
+docs {
+  Generate images using synchronous processing mode.
+  
+  This endpoint demonstrates the legacy synchronous behavior where the request waits
+  for image generation to complete before returning the result. Use this for testing
+  or when you need immediate results.
+  
+  IMPORTANT: The ?sync=true parameter is required since async is now the default.
+  
+  Parameters:
+  - model: Google model ID 
+  - prompt: Text description of the image to generate
+  - n: Number of images to generate (1-16, default: 1)
+  - size: Image dimensions ("1024x1024" or "auto", default: "auto")
+  - quality: Image quality ("auto", "low", "medium", "high")
+  - response_format: Response format ("url" or "b64_json", default: "url")
+  
+  Query Parameters:
+  - sync: REQUIRED "true" to enable synchronous processing
+  
+  Behavior:
+  - Request blocks until generation completes
+  - Returns image data directly in response
+  - May timeout for long-running operations
+  - Best for testing and development
+  
+  When to Use Sync Mode:
+  - ✅ Testing and development
+  - ✅ Small/fast image generations
+  - ✅ When you need immediate results
+  - ❌ Production high-volume applications
+  - ❌ Long-running video generation
+  - ❌ Multiple image generations
+  
+  Returns:
+  - created: Unix timestamp
+  - data: Array of generated images with URLs or base64 data
+  - cost: Optional generation cost information
+}

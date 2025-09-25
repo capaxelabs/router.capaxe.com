@@ -1,0 +1,81 @@
+meta {
+  name: Image Edit
+  type: http
+  seq: 16
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/edits
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/gemini-2.5-flash",
+    "prompt": "Add a red hat to the person in this image",
+    "image": {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+      "type": "image/png", 
+      "filename": "person.png"
+    },
+    "mask": {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYGAAAAACAAFRoJRuAAAAAElFTkSuQmCC",
+      "type": "image/png",
+      "filename": "mask.png"
+    },
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "high",
+    "response_format": "url"
+  }
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+  
+  test("Response should have data array when successful", function() {
+    if (res.getStatus() === 200) {
+      expect(res.getBody().data).to.be.an('array');
+      expect(res.getBody().data[0]).to.have.property('url');
+    }
+  });
+}
+
+docs {
+  Edit images using base64 encoded input images and optional masks.
+  
+  This method allows precise image editing using base64 data instead of file uploads,
+  providing better control and performance for automated image processing workflows.
+  
+  Parameters:
+  - model: Google model ID that supports image editing
+  - prompt: Description of the edit to perform
+  - image: Base64 image object (required):
+    - data: Base64 encoded source image
+    - type: MIME type (e.g., "image/png", "image/jpeg") 
+    - filename: Optional filename for reference
+  - mask: Base64 mask object (optional):
+    - data: Base64 encoded mask image (white = edit area, black = preserve)
+    - type: MIME type
+    - filename: Optional filename
+  - n: Number of variations (1-16, default: 1)
+  - size: Output dimensions
+  - quality: Output quality
+  - response_format: "url" or "b64_json"
+  
+  Image Requirements:
+  - Source image: PNG, JPEG, WebP formats supported
+  - Mask image: Same dimensions as source, grayscale recommended
+  - Base64 data should not include data:image/... prefix
+  
+  Use Cases:
+  - Selective image editing with masks
+  - Automated image processing workflows
+  - Batch image transformations
+  - API-driven image modifications
+}

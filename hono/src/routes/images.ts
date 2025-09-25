@@ -94,8 +94,9 @@ app.post('/generations',
       const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
       
-      // Check if async mode is requested
-      const isAsync = c.req.query('async') === 'true'
+      // Check if sync mode is requested (async is now default)
+      const isSync = c.req.query('sync') === 'true'
+      const isAsync = !isSync
       
       // Create request with potential file data or base64 data
       const requestData: any = { ...validatedData }
@@ -180,7 +181,7 @@ app.post('/generations',
           
           return c.json({
             error: {
-              message: 'Async processing not available in local development. Please try synchronous generation or deploy to Cloudflare.',
+              message: 'Async processing not available in local development. Please add ?sync=true for synchronous generation or deploy to Cloudflare.',
               type: 'async_unavailable',
               details: (queueError as Error).message
             }
@@ -272,8 +273,9 @@ app.post('/edits',
       const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
       
-      // Check if async mode is requested
-      const isAsync = c.req.query('async') === 'true'
+      // Check if sync mode is requested (async is now default)
+      const isSync = c.req.query('sync') === 'true'
+      const isAsync = !isSync
 
       // Create request with potential file data or base64 data
       const requestWithImages: any = { ...validatedData }
@@ -336,7 +338,7 @@ app.post('/edits',
           console.error('Failed to create async image editing task:', queueError)
           return c.json({
             error: {
-              message: 'Failed to create async image editing task. Please try synchronous generation or try again.',
+              message: 'Failed to create async image editing task. Please add ?sync=true for synchronous generation or try again.',
               type: 'async_creation_error'
             }
           }, 500)

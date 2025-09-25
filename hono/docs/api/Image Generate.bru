@@ -1,0 +1,71 @@
+meta {
+  name: Image Generate
+  type: http
+  seq: 19
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/gemini-2.5-flash",
+    "prompt": "Transform this image into a futuristic cyberpunk style with neon lights",
+    "image": {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+      "type": "image/png",
+      "filename": "input.png"
+    },
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "high",
+    "response_format": "url"
+  }
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+  
+  test("Response should have data array when successful", function() {
+    if (res.getStatus() === 200) {
+      expect(res.getBody().data).to.be.an('array');
+    }
+  });
+}
+
+docs {
+  Generate or edit images using base64 encoded input images.
+  
+  This is the new optimized method for image generation that accepts base64 data directly,
+  eliminating the need for file uploads and reducing processing overhead.
+  
+  Parameters:
+  - model: Google model ID (e.g., "google/gemini-2.5-flash")
+  - prompt: Text description or editing instruction
+  - image: Base64 image object with:
+    - data: Base64 encoded image data (without data:image/... prefix)
+    - type: MIME type (e.g., "image/png", "image/jpeg")
+    - filename: Optional filename for reference
+  - n: Number of images to generate (1-16, default: 1)
+  - size: Image dimensions ("1024x1024" or "auto", default: "auto")
+  - quality: Image quality ("auto", "low", "medium", "high")
+  - response_format: Response format ("url" or "b64_json", default: "url")
+  
+  Benefits of Base64 Input:
+  - No file upload overhead
+  - Direct LLM compatibility
+  - Reduced server-side processing
+  - Better performance for programmatic usage
+  
+  Returns:
+  - created: Unix timestamp
+  - data: Array of generated images with URLs or base64 data
+  - cost: Optional generation cost information
+}

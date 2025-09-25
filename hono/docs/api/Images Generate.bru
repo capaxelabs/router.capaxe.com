@@ -1,0 +1,50 @@
+meta {
+  name: Images Generate Multiple
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/imagen-4-fast",
+    "prompt": "A collection of minimalist app icons, modern design, clean lines, various colors",
+    "n": 4,
+    "size": "512x512",
+    "quality": "high",
+    "response_format": "url"
+  }
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+  
+  test("Should return 4 images when successful", function() {
+    if (res.getStatus() === 200) {
+      expect(res.getBody().data).to.have.lengthOf(4);
+    }
+  });
+}
+
+docs {
+  Generate multiple images in a single request.
+  
+  The 'n' parameter allows you to generate 1-16 images at once with the same prompt.
+  This is useful for:
+  - Creating variations of the same concept
+  - Batch processing multiple images
+  - Getting different interpretations of a prompt
+  
+  Each image in the response will be slightly different due to the AI's creative process.
+  
+  Note: Generating multiple images increases processing time and costs.
+}

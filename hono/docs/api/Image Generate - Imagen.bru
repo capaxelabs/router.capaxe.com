@@ -1,0 +1,43 @@
+meta {
+  name: Image Generate  - Imagen
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{APP_URL}}/v1/openai/images/generations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "model": "google/imagen-3-fast",
+    "prompt": "A futuristic cityscape at night with neon lights, cyberpunk style, highly detailed",
+    "n": 1,
+    "size": "1024x1024",
+    "quality": "high",
+    "response_format": "url"
+  }
+}
+
+tests {
+  test("Status should be 200 or contain error details", function() {
+    if (res.getStatus() !== 200) {
+      expect(res.getBody().error).to.be.an('object');
+    }
+  });
+}
+
+docs {
+  Generate images using Google Imagen models.
+  
+  Available Imagen models:
+  - google/imagen-3: High quality, slower generation
+  - google/imagen-3-fast: Good quality, faster generation
+  - google/imagen-4: Latest model with best quality
+  - google/imagen-4-fast: Latest model optimized for speed
+  - google/imagen-4-ultra: Highest quality variant
+  
+  Same parameters as Gemini models apply.
+}
