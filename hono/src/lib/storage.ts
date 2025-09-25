@@ -1,3 +1,5 @@
+import cuid from 'cuid'
+
 interface R2UploadResult {
   success: boolean
   url: string
@@ -19,12 +21,17 @@ export class R2StorageService {
     return this.bucket !== null && !!this.bucketName
   }
 
-  generateFileName(contentType: string, usageLogId: string): string {
-    if (!usageLogId) {
-      throw new Error('usageLogId is required for file naming')
-    }
+  generateFileName(contentType: string, type: 'image' | 'video' = 'image'): string {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    
+    const dateFolder = `${year}/${month}/${day}`
+    const uniqueId = cuid()
     const extension = this.getExtensionFromContentType(contentType)
-    return `${usageLogId}${extension}`
+    
+    return `${type}s/${dateFolder}/${uniqueId}${extension}`
   }
 
   getExtensionFromContentType(contentType: string): string {
@@ -42,12 +49,12 @@ export class R2StorageService {
   }
 
   // Internal helper that handles the actual R2 put request
-  private async _uploadBody(body: ArrayBuffer | ReadableStream | string, contentType: string, usageLogId: string): Promise<R2UploadResult> {
+  private async _uploadBody(body: ArrayBuffer | ReadableStream | string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
     if (!this.bucket) {
       throw new Error('R2 bucket not available')
     }
 
-    const fileName = this.generateFileName(contentType, usageLogId)
+    const fileName = this.generateFileName(contentType, type)
 
     const object = await this.bucket.put(fileName, body, {
       httpMetadata: {
@@ -71,7 +78,7 @@ export class R2StorageService {
     }
   }
 
-  async downloadAndUpload(url: string, contentType: string, usageLogId: string, needBuffer = false): Promise<R2UploadResult> {
+  async downloadAndUpload(url: string, contentType: string, type: 'image' | 'video' = 'image', needBuffer = false): Promise<R2UploadResult> {
     if (!this.isEnabled()) {
       throw new Error('Storage service is not configured')
     }
@@ -90,14 +97,14 @@ export class R2StorageService {
         body = response.body
       }
 
-      return await this._uploadBody(body, contentType, usageLogId)
+      return await this._uploadBody(body, contentType, type)
     } catch (error) {
       console.error('Storage upload error:', error)
       throw new Error(`Failed to upload to storage: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
-  async uploadBase64(base64Data: string, contentType: string, usageLogId: string): Promise<R2UploadResult> {
+  async uploadBase64(base64Data: string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
     if (!this.isEnabled()) {
       throw new Error('Storage service is not configured')
     }
@@ -116,14 +123,14 @@ export class R2StorageService {
         view[i] = binaryString.charCodeAt(i)
       }
       
-      return await this._uploadBody(buffer, contentType, usageLogId)
+      return await this._uploadBody(buffer, contentType, type)
     } catch (error) {
       console.error('Storage upload error:', error)
       throw new Error(`Failed to upload base64 to storage: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
-  async processContent(content: any, responseFormat = 'url', usageLogId: string): Promise<any> {
+  async processContent(content: any, responseFormat = 'url', type: 'image' | 'video' = 'image'): Promise<any> {
     if (!this.isEnabled()) {
       return content
     }
@@ -138,10 +145,10 @@ export class R2StorageService {
       if (content.url) {
         const contentType = this.detectContentType(content.url)
         const needBuffer = responseFormat === 'b64_json'
-        uploadResult = await this.downloadAndUpload(content.url, contentType, usageLogId, needBuffer)
+        uploadResult = await this.downloadAndUpload(content.url, contentType, type, needBuffer)
       } else if (content.b64_json) {  
         const contentType = this.detectContentTypeFromBase64(content.b64_json)
-        uploadResult = await this.uploadBase64(content.b64_json, contentType, usageLogId)
+        uploadResult = await this.uploadBase64(content.b64_json, contentType, type)
       }
 
       if (!uploadResult) {
@@ -210,13 +217,12 @@ export class R2StorageService {
     return 'image/jpeg'
   }
 
-  async processImageResult(result: any, userId: string, responseFormat = 'url', usageLogId: string): Promise<any> {
+  async processImageResult(result: any, userId: string, responseFormat = 'url'): Promise<any> {
     if (!result || !result.data) return result
 
     const processedData = await Promise.all(
-      result.data.map(async (item: any, index: number) => {
-        const itemUsageLogId = result.data.length > 1 ? `${usageLogId}-${index}` : usageLogId
-        return await this.processContent(item, responseFormat, itemUsageLogId)
+      result.data.map(async (item: any) => {
+        return await this.processContent(item, responseFormat, 'image')
       })
     )
 
@@ -226,13 +232,12 @@ export class R2StorageService {
     }
   }
 
-  async processVideoResult(result: any, userId: string, responseFormat = 'url', usageLogId: string): Promise<any> {
+  async processVideoResult(result: any, userId: string, responseFormat = 'url'): Promise<any> {
     if (!result || !result.data) return result
 
     const processedData = await Promise.all(
-      result.data.map(async (item: any, index: number) => {
-        const itemUsageLogId = result.data.length > 1 ? `${usageLogId}-${index}` : usageLogId
-        return await this.processContent(item, responseFormat, itemUsageLogId)
+      result.data.map(async (item: any) => {
+        return await this.processContent(item, responseFormat, 'video')
       })
     )
 

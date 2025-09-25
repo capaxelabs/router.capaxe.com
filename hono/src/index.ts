@@ -1,10 +1,9 @@
 import { Hono } from 'hono'
-import { createDatabase } from './db'
 import { CloudflareBindings, ContextVariables } from './types/env'
 import { getDb } from './middleware/database'
 // Import middleware
 import { corsMiddleware, securityHeaders, apiSecurityHeaders, requestLogger, errorHandler, notFoundHandler, healthCheck } from './middleware/security'
-import { generalLimiter, ipLimiter } from './middleware/rateLimiting'
+import { generalLimiter } from './middleware/rateLimiting'
 
 // Create Hono app with proper typing
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()

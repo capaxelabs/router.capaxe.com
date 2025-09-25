@@ -349,6 +349,6 @@ async function processImageResult(
   userId: string,
   responseFormat: 'url' | 'b64_json'
 ): Promise<GenerationResult> {
-  // Use the Express-style storage service methods
-  return await storageService.processImageResult(result, userId, responseFormat, userId)
+  // Use the updated storage service methods with CUID and date-based folders
+  return await storageService.processImageResult(result, userId, responseFormat)
 }

@@ -1,20 +1,18 @@
-import type { Context, Env, MiddlewareHandler, Next } from 'hono';
+import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { drizzle } from 'drizzle-orm/libsql'
 import { createClient } from '@libsql/client'
 import * as schema from '../db/schema'
+import { CloudflareBindings, ContextVariables } from '../types/env'
 
-export const getDb = (): MiddlewareHandler => {
-    return createMiddleware<Env>(async (ctx: Context, next: Next) => {
+export const getDb = (): MiddlewareHandler<{ Bindings: CloudflareBindings; Variables: ContextVariables }> => {
+    return createMiddleware(async (ctx, next) => {
         if (!ctx.get('db')) {
-            console.log('Creating database connection', `${JSON.stringify(ctx, null, 2)}`)
-            console.log('Creating database connection', `${ctx.env.TURSO_DATABASE_URL} ${ctx.env.TURSO_AUTH_TOKEN}`)
             const client = createClient({
                 url: ctx.env.TURSO_DATABASE_URL,
                 authToken: ctx.env.TURSO_AUTH_TOKEN,
               })
 
-            console.log('Creating database connection', `${ctx.env.TURSO_DATABASE_URL} ${ctx.env.TURSO_AUTH_TOKEN}`)
             ctx.set('db', drizzle(client, { schema }));
         }
 
