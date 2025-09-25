@@ -346,8 +346,8 @@ async function handleCompletedOperation(operation: any, providerKey: string) {
 
   // Extract video data from the response
   const videoData = operation.response?.generatedVideos?.[0]
+  console.log('videoData', JSON.stringify(videoData))
   if (videoData?.videoUri) {
-    // Download the video and convert to base64
     const videoResponse = await fetch(videoData.videoUri, {
       headers: {
         'x-goog-api-key': providerKey
