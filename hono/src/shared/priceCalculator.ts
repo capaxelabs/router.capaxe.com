@@ -19,7 +19,7 @@ export function convertPriceToDbFormat(usdPrice: number): number {
  * If the price cannot be calculated before generation, return the max price.
  */
 export function preCalcPrice(modelName: string, size?: string, quality?: string, providerIndex?: number): number {
-  const modelConfig = models[modelName]
+  const modelConfig = (models as any)[modelName]
   if (!modelConfig) {
     throw new Error(`Model '${modelName}' not found in price calculator`)
   }
@@ -55,7 +55,7 @@ export function postCalcPrice(
   generationResult?: any, 
   providerIndex?: number
 ): number {
-  const modelConfig = models[modelName]
+  const modelConfig = (models as any)[modelName]
   if (!modelConfig) {
     throw new Error(`Model '${modelName}' not found in price calculator`)
   }
