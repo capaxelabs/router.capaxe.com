@@ -5,13 +5,9 @@ meta {
 }
 
 post {
-  url: {{APP_URL}}/v1/openai/videos/generations?async=true
+  url: {{APP_URL}}/v1/openai/videos/generations
   body: json
   auth: none
-}
-
-params:query {
-  async: true
 }
 
 body:json {

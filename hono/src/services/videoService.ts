@@ -161,8 +161,8 @@ export async function generateVideoAsync(
       result = await generateGeminiVideo(c, { ...processedParams, model: actualModel }, userId)
       break
     case 'geminiVideo':
-      // Use mock for async processing until real API is needed
-      result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
+      // Use real Google GenAI API for async processing
+      result = await generateGeminiVideo(c, { ...processedParams, model: actualModel }, userId)
       break
     case 'geminiMock':
       result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
@@ -355,13 +355,23 @@ async function handleCompletedOperation(operation: any, providerKey: string) {
     })
     
     if (videoResponse.ok) {
+      // Store video in R2 storage instead of converting to base64
+      const storageService = new R2StorageService(
+        c.env.STORAGE_BUCKET,
+        c.env.R2_BUCKET_NAME,
+        c.env.R2_CUSTOM_PUBLIC_URL
+      )
+      
       const videoBuffer = await videoResponse.arrayBuffer()
-      const base64Video = btoa(String.fromCharCode(...new Uint8Array(videoBuffer)))
+      
+      // Upload to storage and get public URL
+      const uploadResult = await storageService.uploadFile(videoBuffer, 'video/mp4', 'video')
+      const publicUrl = uploadResult.url
       
       return {
         created: Math.floor(Date.now() / 1000),
         data: [{
-          b64_json: base64Video,
+          url: publicUrl,
           revised_prompt: null
         }]
       }
