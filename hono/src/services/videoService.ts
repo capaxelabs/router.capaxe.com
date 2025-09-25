@@ -400,9 +400,9 @@ async function handleCompletedOperation(operation: any, providerKey: string, env
       
       const videoBuffer = await videoResponse.arrayBuffer()
       
-      // Upload to storage and get public URL
-      const key = `video_${Date.now()}.mp4`
-      const publicUrl = await storageService.uploadFile(key, videoBuffer, {
+      // Upload to storage and get public URL with proper CUID + date structure
+      const fileName = storageService.generateFileName('video/mp4', 'video')
+      const publicUrl = await storageService.uploadFile(fileName, videoBuffer, {
         contentType: 'video/mp4'
       })
       
@@ -498,8 +498,8 @@ async function processVideoResult(
       if (item.b64_json) {
         try {
           const videoBuffer = Uint8Array.from(atob(item.b64_json), c => c.charCodeAt(0))
-          const key = storageService.generateKey(`video_${Date.now()}_${index}.mp4`, userId)
-          const url = await storageService.uploadFile(key, videoBuffer.buffer, {
+          const fileName = storageService.generateFileName('video/mp4', 'video')
+          const url = await storageService.uploadFile(fileName, videoBuffer.buffer, {
             contentType: 'video/mp4'
           })
           
