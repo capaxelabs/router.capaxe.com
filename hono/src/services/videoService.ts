@@ -1,10 +1,12 @@
 import { Context } from 'hono'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleVideoModels } from '../shared/videoModels/google'
+import { bytedanceVideoModels } from '../shared/videoModels/bytedance'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
 import { R2StorageService } from '../lib/storage'
 import { VideoGenerationRequest, VideoGenerationResponse } from '../lib/validation'
+import { pollReplicatePrediction } from './replicateUtils'
 
 export interface VideoGenerationParams extends VideoGenerationRequest {
   files?: {
@@ -38,8 +40,9 @@ export async function generateVideo(
 ): Promise<VideoGenerationResult> {
   const startTime = Date.now()
   
-  // Get model configuration
-  const modelConfig = googleVideoModels[params.model as keyof typeof googleVideoModels]
+  // Get model configuration from both Google and Bytedance models
+  const allVideoModels = { ...googleVideoModels, ...bytedanceVideoModels }
+  const modelConfig = allVideoModels[params.model]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
   }
@@ -69,22 +72,24 @@ export async function generateVideo(
   
   switch (selectedProvider.id) {
     case 'gemini':
-      // Google Veo API takes 5+ minutes - force async for real API calls
-      if (c.req.query('async') === 'true') {
-        throw new Error('Async video generation should be handled by queue consumer')
-      } else {
-        // For sync requests, return mock response with a message about async recommendation
-        console.warn('Google Veo API requires long processing time - consider using async=true')
+      // Google Veo API defaults to async mode for production scalability (5+ minutes)
+      if (c.req.query('async') === 'false') {
+        // For sync requests, return mock response (real API too slow for sync)
+        console.warn('Sync mode for Google Veo - using mock response (real API requires async=true)')
         result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
+      } else {
+        // Default to async mode - handled by queue consumer
+        throw new Error('Async video generation should be handled by queue consumer')
       }
       break
     case 'geminiVideo':
-      // Same as above - Google Veo requires async processing
-      if (c.req.query('async') === 'true') {
-        throw new Error('Async video generation should be handled by queue consumer')
-      } else {
-        console.warn('Google Veo API requires long processing time - consider using async=true')
+      // Google Veo defaults to async mode for production scalability
+      if (c.req.query('async') === 'false') {
+        console.warn('Sync mode for Google Veo - using mock response (real API requires async=true)')
         result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
+      } else {
+        // Default to async mode - handled by queue consumer
+        throw new Error('Async video generation should be handled by queue consumer')
       }
       break
     case 'geminiMock':
@@ -92,6 +97,17 @@ export async function generateVideo(
       break
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
+      break
+    case 'replicate':
+      // Replicate defaults to async mode for production scalability
+      if (c.req.query('async') === 'false') {
+        // Only allow sync mode when explicitly requested (for testing/development)
+        console.warn('Sync mode used for Replicate - not recommended for production')
+        result = await generateReplicateVideo(c, { ...processedParams, model: actualModel }, userId)
+      } else {
+        // Default to async mode - handled by queue consumer
+        throw new Error('Async video generation should be handled by queue consumer')
+      }
       break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
@@ -167,6 +183,17 @@ export async function generateVideoAsync(
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
+    case 'replicate':
+      // Replicate defaults to async mode for production scalability
+      if (c.req.query('async') === 'false') {
+        // Only allow sync mode when explicitly requested (for testing/development)
+        console.warn('Sync mode used for Replicate - not recommended for production')
+        result = await generateReplicateVideo(c, { ...processedParams, model: actualModel }, userId)
+      } else {
+        // Default to async mode - handled by queue consumer
+        throw new Error('Async video generation should be handled by queue consumer')
+      }
+      break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
   }
@@ -230,8 +257,17 @@ async function generateGeminiVideo(
     prompt: params.prompt
   }
 
-  // Map size to aspectRatio and resolution
-  if (params.size) {
+  // Use validated Veo parameters from request
+  if (params.aspect_ratio) {
+    generateOptions.aspectRatio = params.aspect_ratio
+  }
+  
+  if (params.resolution) {
+    generateOptions.resolution = params.resolution
+  }
+  
+  // Fallback to size parameter if aspect_ratio not provided
+  if (!params.aspect_ratio && params.size) {
     const [width, height] = params.size.split('x').map(Number)
     if (width && height) {
       if (width > height) {
@@ -241,13 +277,15 @@ async function generateGeminiVideo(
       } else {
         generateOptions.aspectRatio = '16:9' // Default for square
       }
-      
-      // Set resolution based on model capabilities
-      if (params.model.includes('veo-3') && width >= 1080) {
-        generateOptions.resolution = '1080p'
-      } else {
-        generateOptions.resolution = '720p'
-      }
+    }
+  }
+  
+  // Fallback resolution based on model capabilities
+  if (!params.resolution) {
+    if (params.model.includes('veo-3') && generateOptions.aspectRatio === '16:9') {
+      generateOptions.resolution = '1080p'
+    } else {
+      generateOptions.resolution = '720p'
     }
   }
 
@@ -272,10 +310,19 @@ async function generateGeminiVideo(
       bytesBase64Encoded: base64Data,
       mimeType: imageData.type || (imageData as any).blob?.type || 'image/png'
     }
-    
-    generateOptions.personGeneration = 'allow_adult' // Required for image-to-video
+  }
+
+  // Set person generation parameter (use validated value from request)
+  if (params.person_generation) {
+    generateOptions.personGeneration = params.person_generation
   } else {
-    generateOptions.personGeneration = 'allow_all' // For text-to-video
+    // Default based on whether image is provided
+    generateOptions.personGeneration = params.imagesData && params.imagesData.length > 0 ? 'allow_adult' : 'allow_all'
+  }
+
+  // Add seed parameter if provided
+  if (params.seed) {
+    generateOptions.seed = params.seed
   }
 
   try {
@@ -447,6 +494,11 @@ async function generateVertexVideo(
     parameters: {
       sampleCount: 1,
       safetySetting: 'block_only_high',
+      // Add Veo parameters if provided
+      ...(params.aspect_ratio && { aspectRatio: params.aspect_ratio }),
+      ...(params.resolution && { resolution: params.resolution }),
+      ...(params.person_generation && { personGeneration: params.person_generation }),
+      ...(params.seed && { seed: params.seed })
     }
   }
 
@@ -698,5 +750,78 @@ async function updatePollingStatus(db: any, taskId: string, pollAttempts: number
     
   } catch (error) {
     console.error('Error updating polling status:', error)
+  }
+}
+
+/**
+ * Generate videos using Replicate API
+ */
+async function generateReplicateVideo(
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
+  params: VideoGenerationParams & { model: string },
+  userId: string
+): Promise<VideoGenerationResult> {
+  const providerUrl = `https://api.replicate.com/v1/models/${params.model}/predictions`
+  const providerKey = c.env.REPLICATE_API_KEY
+
+  if (!providerKey) {
+    throw new Error('REPLICATE_API_KEY environment variable is required')
+  }
+
+  // Build the input object starting with the prompt
+  const bodyPayload: Record<string, any> = {
+    input: {
+      prompt: params.prompt
+    }
+  }
+
+  // Add additional parameters from the request
+  if (params.width) bodyPayload.input.width = params.width
+  if (params.height) bodyPayload.input.height = params.height
+  if (params.duration) bodyPayload.input.duration = params.duration
+
+  // Add any additional parameters that might be specific to the model
+  Object.keys(params).forEach(key => {
+    if (!['prompt', 'model', 'width', 'height', 'duration', 'files', 'imagesData'].includes(key)) {
+      bodyPayload.input[key] = params[key as keyof typeof params]
+    }
+  })
+
+  const response = await fetch(providerUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${providerKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(bodyPayload)
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json()
+    throw new Error(`Replicate API error: ${errorData.detail || response.statusText}`)
+  }
+
+  let data = await response.json()
+
+  // If the prediction is still running, poll until it finishes
+  if (data.status !== 'succeeded' || !data.output) {
+    data = await pollReplicatePrediction(data.urls.get, providerKey)
+  }
+
+  // Handle timeout without throwing so credits are not fully refunded
+  if (data.status === 'timeout' || !data.output) {
+    throw new Error('Prediction timed out on Replicate – please try again later')
+  }
+
+  // Process the output - Replicate typically returns URL or array of URLs
+  const output = Array.isArray(data.output) ? data.output : [data.output]
+  
+  return {
+    created: Math.floor(Date.now() / 1000),
+    data: output.map((url: string) => ({
+      url: url,
+      revised_prompt: null
+    })),
+    cost: data.cost || 0
   }
 }

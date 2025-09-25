@@ -20,6 +20,7 @@ export interface CloudflareBindings {
   FAL_API_KEY: string
   RUNWARE_API_KEY: string
   WAVESPEED_API_KEY: string
+  REPLICATE_API_KEY: string
   
   // Application settings
   ENVIRONMENT: string

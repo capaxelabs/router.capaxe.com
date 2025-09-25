@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
 import { googleImageModels } from '../shared/imageModels/google'
 import { googleVideoModels } from '../shared/videoModels/google'
+import { bytedanceImageModels } from '../shared/imageModels/bytedance'
+import { bytedanceVideoModels } from '../shared/videoModels/bytedance'
+import { runwareImageModels } from '../shared/imageModels/runware'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
@@ -27,7 +30,7 @@ app.get('/', (c) => {
     }
   }
 
-  // Combine and sanitize Google models
+  // Combine and sanitize Google, Bytedance, and Runware models
   const allModels = {
     // Google Image Models
     ...Object.fromEntries(
@@ -39,6 +42,27 @@ app.get('/', (c) => {
     // Google Video Models  
     ...Object.fromEntries(
       Object.entries(googleVideoModels).map(([key, value]) => [
+        key,
+        sanitizeModel(value)
+      ])
+    ),
+    // Bytedance Image Models
+    ...Object.fromEntries(
+      Object.entries(bytedanceImageModels).map(([key, value]) => [
+        key,
+        sanitizeModel(value)
+      ])
+    ),
+    // Bytedance Video Models
+    ...Object.fromEntries(
+      Object.entries(bytedanceVideoModels).map(([key, value]) => [
+        key,
+        sanitizeModel(value)
+      ])
+    ),
+    // Runware Image Models
+    ...Object.fromEntries(
+      Object.entries(runwareImageModels).map(([key, value]) => [
         key,
         sanitizeModel(value)
       ])
@@ -276,7 +300,7 @@ app.get('/ui', (c) => {
     <div class="container">
         <div class="header">
             <h1>🤖 ImageRouter Models</h1>
-            <p>Available Google AI Models for Image & Video Generation</p>
+            <p>Available Google, Bytedance & Runware AI Models for Image & Video Generation</p>
         </div>
         
         <div class="controls">
@@ -293,6 +317,10 @@ app.get('/ui', (c) => {
                 <option value="openrouter">OpenRouter</option>
                 <option value="replicate">Replicate</option>
                 <option value="wavespeed">WaveSpeed</option>
+                <option value="fal">FAL</option>
+                <option value="chutes">Chutes</option>
+                <option value="runware">Runware</option>
+                <option value="nanogpt">NanoGPT</option>
             </select>
             <div class="stats">
                 <span id="modelCount">Loading...</span>

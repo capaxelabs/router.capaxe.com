@@ -1,11 +1,14 @@
 import { Context } from 'hono'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleImageModels } from '../shared/imageModels/google'
+import { bytedanceImageModels } from '../shared/imageModels/bytedance'
+import { runwareImageModels } from '../shared/imageModels/runware'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
 import { createStorageService } from '../lib/storage'
 import { extractWidthHeight } from '../lib/imageHelpers'
 import { ImageGenerationRequest, ImageGenerationResponse } from '../lib/validation'
+import { pollReplicatePrediction } from './replicateUtils'
 
 export interface ImageGenerationParams extends ImageGenerationRequest {
   files?: {
@@ -40,8 +43,9 @@ export async function generateImage(
 ): Promise<GenerationResult> {
   const startTime = Date.now()
   
-  // Get model configuration
-  const modelConfig = googleImageModels[params.model]
+  // Get model configuration from Google, Bytedance, and Runware models
+  const allImageModels = { ...googleImageModels, ...bytedanceImageModels, ...runwareImageModels }
+  const modelConfig = allImageModels[params.model]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
   }
@@ -89,6 +93,28 @@ export async function generateImage(
       break
     case 'openrouter':
       result = await generateOpenRouter(c, { ...processedParams, model: actualModel }, userId)
+      break
+    case 'replicate':
+      // Replicate defaults to async mode for production scalability
+      if (c.req.query('async') === 'false') {
+        // Only allow sync mode when explicitly requested (for testing/development)
+        console.warn('Sync mode used for Replicate - not recommended for production')
+        result = await generateReplicate(c, { ...processedParams, model: actualModel }, userId)
+      } else {
+        // Default to async mode - handled by queue consumer
+        throw new Error('Async image generation should be handled by queue consumer')
+      }
+      break
+    case 'runware':
+      // Runware defaults to async mode for production scalability
+      if (c.req.query('async') === 'false') {
+        // Only allow sync mode when explicitly requested (for testing/development)
+        console.warn('Sync mode used for Runware - not recommended for production')
+        result = await generateRunware(c, { ...processedParams, model: actualModel }, userId)
+      } else {
+        // Default to async mode - handled by queue consumer
+        throw new Error('Async image generation should be handled by queue consumer')
+      }
       break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
@@ -358,6 +384,178 @@ async function generateOpenRouter(
 /**
  * Process image generation result through storage
  */
+/**
+ * Generate images using Replicate API
+ */
+async function generateReplicate(
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
+  params: ImageGenerationParams & { model: string },
+  userId: string
+): Promise<GenerationResult> {
+  const providerUrl = `https://api.replicate.com/v1/models/${params.model}/predictions`
+  const providerKey = c.env.REPLICATE_API_KEY
+
+  if (!providerKey) {
+    throw new Error('REPLICATE_API_KEY environment variable is required')
+  }
+
+  // Build the input object starting with the prompt
+  const input: Record<string, any> = {
+    prompt: params.prompt
+  }
+
+  // Add additional parameters from the request
+  if (params.width) input.width = params.width
+  if (params.height) input.height = params.height
+  if (params.n) input.num_outputs = params.n
+  if (params.size) {
+    const { width, height } = extractWidthHeight(params.size)
+    if (width && height) {
+      input.width = width
+      input.height = height
+    }
+  }
+
+  // Add any additional parameters that might be specific to the model
+  Object.keys(params).forEach(key => {
+    if (!['prompt', 'model', 'width', 'height', 'n', 'size', 'files', 'imagesData'].includes(key)) {
+      input[key] = params[key as keyof typeof params]
+    }
+  })
+
+  const requestBody = {
+    input: input
+  }
+
+  const response = await fetch(providerUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${providerKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestBody)
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json()
+    throw new Error(`Replicate API error: ${errorData.detail || response.statusText}`)
+  }
+
+  let data = await response.json()
+
+  // If the prediction is still running, poll until it finishes
+  // Use shorter timeout for images (5 minutes vs 20 minutes for videos)
+  if (data.status !== 'succeeded' || !data.output) {
+    data = await pollReplicatePrediction(data.urls.get, providerKey, {
+      maxAttempts: 60, // 5 minutes at 5-second intervals
+      pollingInterval: 5000
+    })
+  }
+
+  // Handle timeout without throwing so credits are not fully refunded
+  if (data.status === 'timeout' || !data.output) {
+    throw new Error('Prediction timed out on Replicate – please try again later')
+  }
+
+  // Process the output - Replicate typically returns array of URLs
+  const output = Array.isArray(data.output) ? data.output : [data.output]
+  
+  return {
+    created: Math.floor(Date.now() / 1000),
+    data: output.map((url: string) => ({
+      url: url,
+      revised_prompt: null
+    })),
+    cost: data.cost || 0
+  }
+}
+
+/**
+ * Generate images using Runware API
+ */
+async function generateRunware(
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
+  params: ImageGenerationParams & { model: string },
+  userId: string
+): Promise<GenerationResult> {
+  const providerKey = c.env.RUNWARE_API_KEY
+  
+  if (!providerKey) {
+    throw new Error('RUNWARE_API_KEY environment variable is required')
+  }
+
+  // Import the Runware SDK dynamically
+  const { Runware } = await import('@runware/sdk-js')
+  
+  const runware = new Runware({ apiKey: providerKey })
+
+  // Extract width and height from size parameter
+  const { width, height } = extractWidthHeight(params.size || 'auto')
+
+  // Build the request parameters
+  const requestParams: any = {
+    positivePrompt: params.prompt,
+    model: params.model,
+    width: width || 1024,
+    height: height || 1024,
+    numberResults: params.n || 1,
+  }
+
+  // Add optional parameters
+  if (params.steps) {
+    requestParams.steps = params.steps
+  }
+
+  // Add negative prompt if available
+  if (params.negative_prompt) {
+    requestParams.negativePrompt = params.negative_prompt
+  }
+
+  // Add image for image-to-image generation
+  if (params.imagesData && params.imagesData.length > 0) {
+    const imageData = params.imagesData[0]
+    if (imageData.data) {
+      // Convert base64 to buffer for Runware
+      const imageBuffer = Buffer.from(imageData.data, 'base64')
+      const imageBlob = new Blob([imageBuffer], { 
+        type: imageData.type || 'image/png' 
+      })
+      
+      // Upload image to Runware first
+      const uploadResult = await runware.uploadImage({ image: imageBlob })
+      requestParams.imageInitiator = uploadResult.imageUUID
+      requestParams.strength = 0.8 // Default strength for image-to-image
+    }
+  }
+
+  try {
+    // Generate images using Runware
+    const images = await runware.requestImages(requestParams)
+
+    // Process the response
+    return {
+      created: Math.floor(Date.now() / 1000),
+      data: images.map((image: any) => ({
+        url: image.imageURL,
+        revised_prompt: null,
+      })),
+      cost: images.length * 0.002 // Estimate cost - will be updated by postCalcFunction
+    }
+  } catch (error) {
+    const formattedError = {
+      status: 500,
+      statusText: 'INTERNAL_ERROR',
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        type: 'runware_generation_error'
+      },
+      original_response_from_provider: error
+    }
+
+    throw new Error(JSON.stringify(formattedError))
+  }
+}
+
 async function processImageResult(
   result: GenerationResult,
   storageService: any,
