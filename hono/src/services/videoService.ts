@@ -65,13 +65,21 @@ export async function generateVideo(
   
   switch (selectedProvider.id) {
     case 'gemini':
-      result = await generateGeminiVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
-    case 'geminiVideo':
-      // For sync requests, use mock. For async, the queue consumer will use the real API
+      // Google Veo API takes 5+ minutes - force async for real API calls
       if (c.req.query('async') === 'true') {
         throw new Error('Async video generation should be handled by queue consumer')
       } else {
+        // For sync requests, return mock response with a message about async recommendation
+        console.warn('Google Veo API requires long processing time - consider using async=true')
+        result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
+      }
+      break
+    case 'geminiVideo':
+      // Same as above - Google Veo requires async processing
+      if (c.req.query('async') === 'true') {
+        throw new Error('Async video generation should be handled by queue consumer')
+      } else {
+        console.warn('Google Veo API requires long processing time - consider using async=true')
         result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
       }
       break
@@ -94,6 +102,11 @@ export async function generateVideo(
   if (!params.model.includes('test')) {
     const storageService = new R2StorageService(c.env.STORAGE_BUCKET)
     result = await processVideoResult(result, storageService, userId, params.response_format || 'url')
+  }
+
+  // Add async recommendation for Google models
+  if ((selectedProvider.id === 'gemini' || selectedProvider.id === 'geminiVideo') && c.req.query('async') !== 'true') {
+    console.log('Google Veo models work best with async=true for real video generation')
   }
 
   return result
