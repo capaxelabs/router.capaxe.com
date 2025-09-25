@@ -13,7 +13,7 @@ class Veo3Fast {
             type: PRICING_TYPES.FIXED,
             value: 3.2,
           },
-          /* applyImage: applyVertexImage */
+          applyImage: applyVertexImage
         }, {
           id: 'replicate',
           model_name: 'google/veo-3-fast',

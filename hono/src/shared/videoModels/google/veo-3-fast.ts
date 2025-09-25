@@ -10,8 +10,8 @@ class Veo3Fast {
       id: 'google/veo-3-fast',
       providers: [
         {
-          id: 'geminiVideo',
-        model_name: 'gemini-2.0-flash-exp',
+          id: 'gemini',
+        model_name: 'veo-3.0-generate-001',
           pricing: {
             type: PRICING_TYPES.FIXED,
             value: 3.2,
