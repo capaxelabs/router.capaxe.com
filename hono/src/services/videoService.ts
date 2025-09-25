@@ -381,7 +381,6 @@ async function handleCompletedOperation(operation: any, providerKey: string, env
   const videoData = operation.response?.generatedVideos?.[0]
   console.log('videoData', JSON.stringify(videoData))
   
-  // Handle both old and new response formats
   const videoUri = videoData?.video?.uri || videoData?.videoUri
   
   if (videoUri) {
