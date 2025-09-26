@@ -123,7 +123,7 @@ app.post('/generations',
           result: {
             created: Math.floor(Date.now() / 1000),
             data: [{ url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4' }],
-            cost: 0.0001
+            cost: 1
           }
         })
       }
