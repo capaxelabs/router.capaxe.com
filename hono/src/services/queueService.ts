@@ -194,6 +194,60 @@ export class QueueService {
     const record = result[0]
     if (!record) return null
 
+    // Handle test mode tasks
+    let metadata: any = {}
+    try {
+      metadata = record.metadata ? JSON.parse(record.metadata) : {}
+    } catch (e) {
+      // Ignore invalid metadata
+    }
+
+    // If this is a test task and enough time has passed, auto-complete it
+    if (metadata.test_mode && record.taskStatus === 'processing') {
+      const now = Date.now()
+      const createdAt = record.createdAt.getTime()
+      const elapsedMinutes = (now - createdAt) / (1000 * 60)
+      const expectedDuration = metadata.duration || 5 // Default 5 minutes
+
+      // Auto-complete test task after expected duration
+      if (elapsedMinutes >= expectedDuration) {
+        const mockVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+        
+        // Update the task to completed status
+        await this.db
+          .update(apiUsage)
+          .set({
+            taskStatus: 'completed',
+            taskProgress: 100,
+            taskCompletedAt: new Date(),
+            outputUrls: JSON.stringify([mockVideoUrl]),
+            cost: 1, // Mock cost in 1e-4 USD units (0.0001 USD)
+            provider: 'test'
+          })
+          .where(eq(apiUsage.taskId, taskId))
+
+        // Return completed status immediately
+        return {
+          taskId: record.taskId!,
+          type: record.taskId!.startsWith('img_') ? 'image' : 'video',
+          status: 'completed' as any,
+          progress: 100,
+          createdAt: record.createdAt.getTime(),
+          updatedAt: now,
+          completedAt: now,
+          model: record.model,
+          prompt: record.prompt,
+          imageSize: record.imageSize,
+          quality: record.quality,
+          result: {
+            created: Math.floor(now / 1000),
+            data: [{ url: mockVideoUrl }],
+            cost: 0.0001 // $0.0001 for test
+          }
+        }
+      }
+    }
+
     const outputUrls = record.outputUrls ? JSON.parse(record.outputUrls) : []
     
     const response: TaskStatusResponse = {
@@ -202,13 +256,13 @@ export class QueueService {
       status: record.taskStatus as any,
       progress: record.taskProgress || 0,
       createdAt: record.createdAt.getTime(),
-      updatedAt: record.updatedAt?.getTime() || record.createdAt.getTime(),
+      updatedAt: record.createdAt.getTime(), // No updatedAt field in schema
       
       // Request details
       model: record.model,
       prompt: record.prompt,
       imageSize: record.imageSize,
-      quality: record.quality,
+      quality: record.quality || undefined,
     }
 
     // Add timestamps if available

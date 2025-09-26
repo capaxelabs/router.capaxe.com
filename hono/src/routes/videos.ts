@@ -61,6 +61,72 @@ app.post('/generations',
         delete requestData.image
       }
       
+      // TEST MODE: Return mock response for development
+      if (validatedData.test === true) {
+        const { generateTaskId } = await import('../services/taskIdGenerator')
+        const taskId = generateTaskId('video', authenticatedUser!.id)
+        const estimatedTime = Date.now() + (validatedData.duration || 5) * 60 * 1000 // duration in minutes
+        
+        // Create a mock database entry for test mode (completed immediately)
+        try {
+          const db = c.get('db')
+          if (db) {
+            const { apiUsage } = await import('../db/schema')
+            const mockVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+            const now = new Date()
+            
+            await db.insert(apiUsage).values({
+              id: crypto.randomUUID(),
+              taskId: taskId,
+              userId: authenticatedUser!.id,
+              apiKeyId: authenticatedUser!.apiKeyId,
+              model: validatedData.model,
+              prompt: validatedData.prompt,
+              inputTokens: Math.floor(validatedData.prompt.length / 4), // Rough token estimate
+              outputTokens: 0,
+              totalTokens: Math.floor(validatedData.prompt.length / 4),
+              imageSize: validatedData.size,
+              imageCount: 1,
+              requestCost: 0.01, // Mock cost
+              cost: 0.0001, // Total cost in cents
+              speedMs: 100, // Mock speed value for test mode
+              status: 'completed', // Completed immediately for test mode
+              outputUrls: JSON.stringify([mockVideoUrl]), // Mock video URL
+              taskType: 'video',
+              taskStatus: 'completed', // Completed immediately
+              taskProgress: 100, // 100% complete
+              taskStartedAt: now,
+              taskCompletedAt: now,
+              isAsync: true,
+              provider: 'test', // Required field - set to 'test' for test mode
+              metadata: JSON.stringify({
+                test_mode: true,
+                model: validatedData.model,
+                duration: validatedData.duration,
+                aspect_ratio: validatedData.aspect_ratio,
+                resolution: validatedData.resolution,
+                provider: 'test'
+              }),
+              ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+            })
+          }
+        } catch (dbError) {
+          console.warn('Failed to create test database entry:', dbError)
+        }
+        
+        return c.json({
+          taskId,
+          status: 'completed',
+          type: 'video',
+          createdAt: Date.now(),
+          message: 'Test video generation completed immediately. Use GET /v1/tasks/:taskId to retrieve results.',
+          result: {
+            created: Math.floor(Date.now() / 1000),
+            data: [{ url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4' }],
+            cost: 0.0001
+          }
+        })
+      }
 
       if (isAsync) {
         // ASYNC MODE: Create task and return immediately
