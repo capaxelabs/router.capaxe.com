@@ -1,0 +1,168 @@
+meta {
+  name: Admin - Bulk Import Models
+  type: http
+  seq: 36
+}
+
+post {
+  url: {{APP_URL}}/admin/models/bulk
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+body:json {
+  {
+    "models": [
+      {
+        "id": "openai/dall-e-4",
+        "name": "DALL-E 4",
+        "slug": "dall-e-4",
+        "type": "image",
+        "status": "active",
+        "providers": [
+          {
+            "id": "openai",
+            "model_name": "dall-e-4",
+            "pricing": {
+              "type": "fixed",
+              "value": 0.08
+            }
+          }
+        ],
+        "releaseDate": "2025-04-01",
+        "description": "Latest DALL-E model",
+        "tags": ["openai", "dall-e"],
+        "category": "text-to-image"
+      },
+      {
+        "id": "stability/stable-diffusion-4",
+        "name": "Stable Diffusion 4",
+        "slug": "stable-diffusion-4",
+        "type": "image",
+        "status": "beta",
+        "providers": [
+          {
+            "id": "stability",
+            "model_name": "stable-diffusion-4-turbo",
+            "pricing": {
+              "type": "calculated",
+              "value": 0.05
+            }
+          }
+        ],
+        "releaseDate": "2025-05-01",
+        "description": "Next generation Stable Diffusion",
+        "tags": ["stability", "stable-diffusion"],
+        "category": "text-to-image"
+      }
+    ]
+  }
+}
+
+tests {
+  test("Should import models successfully", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+    expect(res.getBody().imported).to.be.a('number');
+    expect(res.getBody().results).to.be.an('object');
+  });
+}
+
+docs {
+  # Bulk Import Models
+  
+  Import multiple models in a single request. Useful for:
+  - Initial database seeding
+  - Migrating models from another system
+  - Batch updates across multiple models
+  
+  ## Request Format
+  ```json
+  {
+    "models": [
+      {
+        "id": "...",
+        "name": "...",
+        "slug": "...",
+        "type": "image|video",
+        "providers": [...],
+        "releaseDate": "...",
+        // ... other fields
+      }
+    ]
+  }
+  ```
+  
+  ## Response Format
+  ```json
+  {
+    "success": true,
+    "message": "Bulk import completed",
+    "imported": 15,
+    "failed": 2,
+    "results": {
+      "success": [
+        "google/gemini-3.0",
+        "google/imagen-5",
+        ...
+      ],
+      "failed": [
+        {
+          "id": "duplicate/model",
+          "error": "UNIQUE constraint failed: models.id"
+        }
+      ]
+    }
+  }
+  ```
+  
+  ## Field Requirements
+  Each model in the array must include:
+  - **id**: Unique model identifier
+  - **name**: Human-readable name
+  - **slug**: URL-friendly slug (must be unique)
+  - **type**: "image" or "video"
+  - **providers**: Array with at least one provider
+  - **releaseDate**: ISO 8601 date
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header.
+  
+  ## Response Codes
+  - **200**: Bulk import completed (check results for individual failures)
+  - **400**: Invalid request format
+  - **401**: Missing or invalid admin key
+  - **500**: Server error
+  
+  ## Error Handling
+  - The operation is **transactional per model**
+  - If one model fails, others continue processing
+  - Failed imports are reported in the `results.failed` array
+  - Common failure reasons:
+    - Duplicate ID or slug
+    - Missing required fields
+    - Invalid data types
+  
+  ## Performance Notes
+  - Can handle 100+ models in a single request
+  - Processing time: ~50-100ms per model
+  - Cache is cleared once at the end
+  - Consider batching in groups of 50 for very large imports
+  
+  ## Example Use Cases
+  
+  ### Import from JSON file
+  ```bash
+  curl -X POST https://api.example.com/admin/models/bulk \
+    -H "Authorization: Bearer admin-key" \
+    -H "Content-Type: application/json" \
+    -d @models-export.json
+  ```
+  
+  ### Migrate from old system
+  Export models from old system → Transform to new format → Bulk import
+}

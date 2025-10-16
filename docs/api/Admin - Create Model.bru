@@ -1,0 +1,111 @@
+meta {
+  name: Admin - Create Model
+  type: http
+  seq: 30
+}
+
+post {
+  url: {{APP_URL}}/admin/models
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+body:json {
+  {
+    "id": "google/gemini-3.0",
+    "name": "Gemini 3.0",
+    "slug": "gemini-30",
+    "type": "image",
+    "status": "beta",
+    "isPublic": true,
+    "providers": [
+      {
+        "id": "gemini",
+        "model_name": "gemini-3.0-image-preview",
+        "pricing": {
+          "type": "fixed",
+          "value": 0.05
+        }
+      }
+    ],
+    "arenaScore": 1200,
+    "releaseDate": "2025-03-01",
+    "description": "Next generation Gemini model with improved image quality",
+    "examples": [
+      {
+        "image": "/model-examples/gemini-3.0-example.webp",
+        "prompt": "A futuristic cityscape"
+      }
+    ],
+    "capabilities": {
+      "supportsImage": true,
+      "supportsMask": false,
+      "supportsQuality": true,
+      "aspectRatios": ["1:1", "3:4", "4:3", "16:9", "9:16"]
+    },
+    "applyImageFn": "gemini30ApplyImage",
+    "postCalcPriceFn": "gemini30PostCalc",
+    "tags": ["new", "beta", "google"],
+    "category": "text-to-image",
+    "maxRequestsPerDay": null,
+    "requiresWhitelist": false
+  }
+}
+
+tests {
+  test("Should create model successfully", function() {
+    expect(res.getStatus()).to.equal(201);
+    expect(res.getBody().success).to.be.true;
+    expect(res.getBody().model.id).to.equal("google/gemini-3.0");
+  });
+  
+  test("Should reject duplicate model", function() {
+    if (res.getStatus() === 409) {
+      expect(res.getBody().success).to.be.false;
+      expect(res.getBody().error).to.include("already exists");
+    }
+  });
+}
+
+docs {
+  # Create New Model
+  
+  Creates a new model entry in the database. Requires admin authentication.
+  
+  ## Required Fields
+  - **id**: Unique model identifier (e.g., "google/gemini-3.0")
+  - **name**: Human-readable model name
+  - **slug**: URL-friendly slug (must be unique)
+  - **type**: Either "image" or "video"
+  - **providers**: Array of provider configurations (must have at least one)
+  - **releaseDate**: ISO 8601 date string
+  
+  ## Optional Fields
+  - **status**: "active", "inactive", "deprecated", or "beta" (default: "active")
+  - **isPublic**: Boolean, whether model is publicly visible (default: true)
+  - **arenaScore**: Integer ranking score
+  - **description**: Text description of the model
+  - **examples**: Array of example outputs with prompts
+  - **capabilities**: Object describing model features
+  - **applyImageFn**: Function name from registry for image processing
+  - **postCalcPriceFn**: Function name for post-generation pricing
+  - **tags**: Array of tag strings
+  - **category**: Category classification
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header:
+  ```
+  Authorization: Bearer your-admin-key
+  ```
+  
+  ## Response Codes
+  - **201**: Model created successfully
+  - **400**: Validation error (missing required fields)
+  - **401**: Missing or invalid admin key
+  - **409**: Model with this ID or slug already exists
+  - **500**: Server error
+}

@@ -1,0 +1,109 @@
+meta {
+  name: Admin - List Models
+  type: http
+  seq: 33
+}
+
+get {
+  url: {{APP_URL}}/admin/models?type=image&status=active
+  body: none
+  auth: bearer
+}
+
+params:query {
+  type: image
+  status: active
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+tests {
+  test("Should return list of models", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+    expect(res.getBody().models).to.be.an('array');
+    expect(res.getBody().count).to.be.a('number');
+  });
+}
+
+docs {
+  # List All Models
+  
+  Retrieves a list of all models in the database with optional filtering.
+  
+  ## Query Parameters (all optional)
+  
+  ### type
+  Filter by model type:
+  - `image` - Only image generation models
+  - `video` - Only video generation models
+  
+  ### status
+  Filter by model status:
+  - `active` - Only active models
+  - `inactive` - Only inactive models
+  - `deprecated` - Only deprecated models
+  - `beta` - Only beta models
+  
+  ### provider
+  Filter by provider ID:
+  - `gemini` - Google Gemini models
+  - `vertex` - Google Vertex AI models
+  - `runware` - Runware models
+  
+  ## Examples
+  
+  ### Get all active image models
+  ```
+  GET /admin/models?type=image&status=active
+  ```
+  
+  ### Get all video models
+  ```
+  GET /admin/models?type=video
+  ```
+  
+  ### Get all Runware models
+  ```
+  GET /admin/models?provider=runware
+  ```
+  
+  ### Get all models (no filters)
+  ```
+  GET /admin/models
+  ```
+  
+  ## Response Format
+  ```json
+  {
+    "success": true,
+    "count": 22,
+    "models": [
+      {
+        "id": "google/gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "type": "image",
+        "status": "active",
+        "providers": [...],
+        "capabilities": {...},
+        ...
+      }
+    ]
+  }
+  ```
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header.
+  
+  ## Response Codes
+  - **200**: Success
+  - **401**: Missing or invalid admin key
+  - **500**: Server error
+  
+  ## Notes
+  - Results are cached for 5 minutes
+  - Models include hydrated functions from registry
+  - JSON fields (providers, capabilities, tags) are automatically parsed
+}

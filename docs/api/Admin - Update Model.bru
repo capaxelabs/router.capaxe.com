@@ -1,0 +1,81 @@
+meta {
+  name: Admin - Update Model
+  type: http
+  seq: 31
+}
+
+patch {
+  url: {{APP_URL}}/admin/models/google/gemini-2.5-flash
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+body:json {
+  {
+    "description": "Updated description for Gemini 2.5 Flash",
+    "arenaScore": 1180,
+    "tags": ["fast", "multi-modal", "google", "updated"],
+    "capabilities": {
+      "supportsImage": true,
+      "supportsMask": false,
+      "supportsQuality": true,
+      "aspectRatios": ["1:1", "3:4", "4:3", "16:9", "9:16", "21:9"]
+    }
+  }
+}
+
+tests {
+  test("Should update model successfully", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+    expect(res.getBody().model).to.be.an('object');
+  });
+  
+  test("Should return 404 for non-existent model", function() {
+    if (res.getStatus() === 404) {
+      expect(res.getBody().success).to.be.false;
+      expect(res.getBody().error).to.include("not found");
+    }
+  });
+}
+
+docs {
+  # Update Existing Model
+  
+  Updates an existing model with partial data. Only fields provided in the request body will be updated.
+  
+  ## URL Parameter
+  - **:id**: The model ID to update (e.g., "google/gemini-2.5-flash")
+  
+  ## Updatable Fields
+  All model fields can be updated except:
+  - The model ID itself (use the URL parameter to specify which model)
+  
+  Common fields to update:
+  - **name**: Human-readable name
+  - **status**: Change between "active", "inactive", "deprecated", "beta"
+  - **description**: Update description text
+  - **arenaScore**: Update ranking score
+  - **capabilities**: Modify supported features
+  - **tags**: Update tag list
+  - **providers**: Update provider configurations and pricing
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header.
+  
+  ## Response Codes
+  - **200**: Model updated successfully
+  - **400**: Validation error
+  - **401**: Missing or invalid admin key
+  - **404**: Model not found
+  - **500**: Server error
+  
+  ## Notes
+  - The cache is automatically cleared for the updated model
+  - updatedAt timestamp is automatically set
+  - Only send fields you want to update (partial updates supported)
+}

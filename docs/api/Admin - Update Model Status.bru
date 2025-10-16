@@ -1,0 +1,90 @@
+meta {
+  name: Admin - Update Model Status
+  type: http
+  seq: 32
+}
+
+put {
+  url: {{APP_URL}}/admin/models/google/gemini-2.5-flash/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+body:json {
+  {
+    "status": "active"
+  }
+}
+
+tests {
+  test("Should update status successfully", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+    expect(res.getBody().newStatus).to.equal("active");
+  });
+  
+  test("Should reject invalid status", function() {
+    if (res.getStatus() === 400) {
+      expect(res.getBody().success).to.be.false;
+      expect(res.getBody().error).to.include("Status must be one of");
+    }
+  });
+}
+
+docs {
+  # Update Model Status
+  
+  Quick endpoint to update only the model's status. Useful for enabling/disabling models without a full update.
+  
+  ## URL Parameter
+  - **:id**: The model ID (e.g., "google/gemini-2.5-flash")
+  
+  ## Request Body
+  - **status** (required): One of:
+    - `"active"` - Model is available for use
+    - `"inactive"` - Model is disabled (soft delete)
+    - `"deprecated"` - Model is outdated but still available
+    - `"beta"` - Model is in beta testing
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header.
+  
+  ## Response Codes
+  - **200**: Status updated successfully
+  - **400**: Invalid status value
+  - **401**: Missing or invalid admin key
+  - **404**: Model not found
+  - **500**: Server error
+  
+  ## Common Use Cases
+  
+  ### Enable a Model
+  ```json
+  { "status": "active" }
+  ```
+  
+  ### Disable a Model (Soft Delete)
+  ```json
+  { "status": "inactive" }
+  ```
+  
+  ### Mark as Beta
+  ```json
+  { "status": "beta" }
+  ```
+  
+  ### Deprecate a Model
+  ```json
+  { "status": "deprecated" }
+  ```
+  When setting to "deprecated", the deprecatedAt timestamp is automatically set.
+  
+  ## Notes
+  - Cache is automatically cleared for the updated model
+  - Much faster than full PATCH update for status-only changes
+  - Returns both previous and new status for confirmation
+}

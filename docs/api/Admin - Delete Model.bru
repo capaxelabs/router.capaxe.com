@@ -1,0 +1,107 @@
+meta {
+  name: Admin - Delete Model
+  type: http
+  seq: 35
+}
+
+delete {
+  url: {{APP_URL}}/admin/models/google/gemini-2.5-flash?hard=false
+  body: none
+  auth: bearer
+}
+
+params:query {
+  hard: false
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+tests {
+  test("Should delete model successfully", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+  });
+  
+  test("Should return 404 for non-existent model", function() {
+    if (res.getStatus() === 404) {
+      expect(res.getBody().success).to.be.false;
+      expect(res.getBody().error).to.include("not found");
+    }
+  });
+}
+
+docs {
+  # Delete Model
+  
+  Deletes a model from the database. Supports both soft delete (default) and hard delete.
+  
+  ## URL Parameter
+  - **:id**: The model ID to delete (e.g., "google/gemini-2.5-flash")
+  
+  ## Query Parameters
+  
+  ### hard (optional)
+  - `false` (default): Soft delete - Sets status to "inactive"
+  - `true`: Hard delete - Permanently removes from database
+  
+  ## Soft Delete (Default)
+  Changes model status to "inactive" but keeps the record in database.
+  This is the recommended approach as it:
+  - Preserves historical data
+  - Allows easy restoration
+  - Maintains referential integrity
+  
+  ```
+  DELETE /admin/models/google/gemini-3.0
+  ```
+  
+  Response:
+  ```json
+  {
+    "success": true,
+    "message": "Model deactivated (soft delete)",
+    "modelId": "google/gemini-3.0",
+    "note": "Use ?hard=true to permanently delete"
+  }
+  ```
+  
+  ## Hard Delete
+  Permanently removes the model from the database. **This action cannot be undone.**
+  
+  ```
+  DELETE /admin/models/google/gemini-3.0?hard=true
+  ```
+  
+  Response:
+  ```json
+  {
+    "success": true,
+    "message": "Model permanently deleted",
+    "modelId": "google/gemini-3.0"
+  }
+  ```
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header.
+  
+  ## Response Codes
+  - **200**: Model deleted successfully
+  - **401**: Missing or invalid admin key
+  - **404**: Model not found
+  - **500**: Server error
+  
+  ## ⚠️ Important Notes
+  - **Soft delete is recommended** for production use
+  - Hard delete is permanent and cannot be undone
+  - Cache is automatically cleared after deletion
+  - Existing API usage records are NOT deleted
+  
+  ## Restoring Soft-Deleted Models
+  To restore a soft-deleted model, update its status:
+  ```
+  PUT /admin/models/google/gemini-3.0/status
+  { "status": "active" }
+  ```
+}

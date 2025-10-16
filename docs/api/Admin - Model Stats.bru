@@ -1,0 +1,78 @@
+meta {
+  name: Admin - Model Stats
+  type: http
+  seq: 37
+}
+
+get {
+  url: {{APP_URL}}/admin/models/stats
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ADMIN_API_KEY}}
+}
+
+tests {
+  test("Should return statistics", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+    expect(res.getBody().stats).to.be.an('object');
+    expect(res.getBody().stats.total).to.be.a('number');
+  });
+}
+
+docs {
+  # Model Statistics
+  
+  Returns aggregate statistics about models in the database.
+  
+  ## Response Format
+  ```json
+  {
+    "success": true,
+    "stats": {
+      "total": 22,
+      "active": 21,
+      "inactive": 1,
+      "deprecated": 0,
+      "beta": 3,
+      "image": 18,
+      "video": 4
+    }
+  }
+  ```
+  
+  ## Statistics Provided
+  
+  ### By Status
+  - **total**: Total number of models
+  - **active**: Models with status "active"
+  - **inactive**: Models with status "inactive"
+  - **deprecated**: Models with status "deprecated"
+  - **beta**: Models with status "beta"
+  
+  ### By Type
+  - **image**: Image generation models
+  - **video**: Video generation models
+  
+  ## Authentication
+  Requires ADMIN_API_KEY in Authorization header.
+  
+  ## Response Codes
+  - **200**: Statistics returned successfully
+  - **401**: Missing or invalid admin key
+  - **500**: Server error
+  
+  ## Use Cases
+  - Dashboard overview
+  - Monitoring model availability
+  - Capacity planning
+  - Health checks
+  
+  ## Performance
+  - Fast query (< 50ms typically)
+  - Results are cached for 5 minutes
+  - Useful for admin dashboards
+}

@@ -1,0 +1,30 @@
+# ImageRouter Environment Variables (Development)
+# Copy this file to .dev.vars and fill in your values
+
+# Database (Turso)
+TURSO_DATABASE_URL=libsql://your-database.turso.io
+TURSO_AUTH_TOKEN=your-turso-auth-token
+
+# Storage (R2)
+R2_BUCKET_NAME=imagerouter
+R2_CUSTOM_PUBLIC_URL=https://storage.example.com
+
+# Provider API Keys
+GEMINI_API_KEY=your-gemini-api-key
+REPLICATE_API_KEY=your-replicate-api-key
+RUNWARE_API_KEY=your-runware-api-key
+
+# Google Cloud (for Vertex AI)
+GOOGLE_CLOUD_PROJECT_ID=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_SERVICE_ACCOUNT_KEY={"type":"service_account",...}
+
+# Authentication
+JWT_SECRET=your-jwt-secret-min-32-chars
+
+# Admin API
+ADMIN_API_KEY=your-secure-admin-key-min-32-chars
+
+# Environment
+ENVIRONMENT=development
+PROXY_COUNT=0
