@@ -92,15 +92,8 @@ export async function generateImage(
       result = await generateVertex(c, { ...processedParams, model: actualModel }, userId)
       break
     case 'runware':
-      // Runware defaults to async mode for production scalability
-      if (c.req.query('async') === 'false') {
-        // Only allow sync mode when explicitly requested (for testing/development)
-        console.warn('Sync mode used for Runware - not recommended for production')
-        result = await generateRunware(c, { ...processedParams, model: actualModel }, userId)
-      } else {
-        // Default to async mode - handled by queue consumer
-        throw new Error('Async image generation should be handled by queue consumer')
-      }
+      // Runware generation (called from queue consumer for async or directly for sync)
+      result = await generateRunware(c, { ...processedParams, model: actualModel }, userId)
       break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
@@ -312,20 +305,25 @@ async function generateRunware(
 ): Promise<GenerationResult> {
   const providerKey = c.env.RUNWARE_API_KEY
 
+  console.log('[Runware] Starting image generation')
+  console.log(`[Runware] API key available: ${providerKey ? 'YES' : 'NO (MISSING!)'}`)
+  console.log('[Runware] Received params keys:', Object.keys(params).join(', '))
+  console.log('[Runware] Full params object:', JSON.stringify(params, null, 2))
+
   if (!providerKey) {
-    throw new Error('RUNWARE_API_KEY environment variable is required')
+    throw new Error('RUNWARE_API_KEY environment variable is not configured. Please add it to your .env or wrangler.jsonc')
   }
 
   try {
     // Import Runware service
     const { getRunwareService } = await import('./runwareService')
 
-    // Get or create Runware service instance (singleton pattern)
-    const runwareService = getRunwareService(providerKey, {
-      shouldReconnect: true,
-      globalMaxRetries: 3,
-      timeoutDuration: 90000 // 90 seconds
-    })
+    console.log('[Runware] Creating/getting REST API service instance...')
+    
+    // Get or create Runware service instance (REST API - no connection needed)
+    const runwareService = getRunwareService(providerKey)
+    
+    console.log('[Runware] REST API service instance ready')
 
     // Determine if this is a background removal operation
     const isBackgroundRemoval = params.model.includes('runware:110@1')
@@ -333,24 +331,28 @@ async function generateRunware(
     // Extract width and height from size parameter
     const { width, height } = extractWidthHeight(params.size || 'auto')
 
-    // Build Runware request parameters
+    // Build Runware request parameters - ONLY pass Runware-compatible fields
     const runwareParams: any = {
       model: params.model,
       prompt: params.prompt,
       width: width || 1024,
       height: height || 1024,
       n: params.n || 1,
-      includeCost: true,
-      response_format: params.response_format || 'url'
+      includeCost: true
+      // Note: response_format is NOT a Runware parameter, don't include it
     }
 
-    // Add optional parameters
+    console.log('[Runware] Built runwareParams keys:', Object.keys(runwareParams).join(', '))
+
+    // Add optional parameters - ONLY if they exist and are valid
     if (params.negativePrompt) runwareParams.negativePrompt = params.negativePrompt
     if (params.steps) runwareParams.steps = params.steps
     if (params.seed) runwareParams.seed = params.seed
     if (params.guidance) runwareParams.guidance = params.guidance
     if (params.scheduler) runwareParams.scheduler = params.scheduler
     if (params.lora) runwareParams.lora = params.lora
+    
+    console.log('[Runware] After adding optional params, keys:', Object.keys(runwareParams).join(', '))
 
     // Handle special operations
     if (isBackgroundRemoval && params.inputImage) {
@@ -381,8 +383,11 @@ async function generateRunware(
       runwareParams.upscaleFactor = params.upscaleFactor || 4
     }
 
-    // Generate image using Runware SDK
+    // Generate image using Runware REST API
+    console.log('[Runware] Final runwareParams before API call:', JSON.stringify(runwareParams, null, 2))
+    console.log('[Runware] Calling runwareService.generateImage()...')
     const result = await runwareService.generateImage(runwareParams)
+    console.log(`[Runware] ✓ Generation successful, received ${result.data.length} images`)
 
     return result
   } catch (error) {

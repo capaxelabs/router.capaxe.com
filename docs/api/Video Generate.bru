@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{APP_URL}}/v1/openai/videos/generations
+  url: {{APP_URL}}/v1/videos/generations
   body: json
   auth: none
 }
@@ -21,7 +21,7 @@ body:json {
     },
     "duration": 5,
     "fps": 24,
-    "size": "1280x720",
+    "size": "720x720",
     "response_format": "url"
   }
 }

@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{APP_URL}}/v1/openai/images/generations
+  url: {{APP_URL}}/v1/images/generations
   body: json
   auth: none
 }
@@ -13,15 +13,10 @@ post {
 body:json {
   {
     "model": "google/gemini-2.5-flash",
-    "prompt": "Transform this image into a futuristic cyberpunk style with neon lights",
-    "image": {
-      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
-      "type": "image/png",
-      "filename": "input.png"
-    },
+    "prompt": "Generate an iamge where Gandhi ji is dancing in a pub. ",
     "n": 1,
     "size": "1024x1024",
-    "quality": "high",
+    "quality": "medium",
     "response_format": "url"
   }
 }

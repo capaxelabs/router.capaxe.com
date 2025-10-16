@@ -1,58 +1,17 @@
 /**
- * Runware Service - Shared implementation for image and video generation
- * Using the official @runware/sdk-js library with WebSocket-based API
+ * Runware Service - REST API implementation
+ * Using the Runware REST API v1
  *
- * @see https://runware.ai/docs/en/libraries/javascript
- * @see https://github.com/Runware/sdk-js
+ * @see https://docs.runware.ai/en/image-inference/api-reference
+ * @see https://api.runware.ai/v1
  */
-
-import { Runware } from '@runware/sdk-js'
-import type {
-  IImageInference,
-  IImage,
-  IError,
-  IUpscaleGan,
-  IRemoveImageBackground,
-  IImageToText
-} from '@runware/sdk-js'
-
-/**
- * Video generation request interface
- * Based on Runware's video inference API
- */
-export interface IVideoInference {
-  positivePrompt: string
-  model: string
-  duration: number
-  width?: number
-  height?: number
-  negativePrompt?: string
-  seed?: number
-  outputFormat?: 'mp4' | 'webm'
-  includeCost?: boolean
-  taskUUID?: string
-  retry?: number
-}
-
-/**
- * Video generation response
- */
-export interface IVideo {
-  taskUUID: string
-  videoURL: string
-  cost?: number
-  NSFWContent?: boolean
-}
 
 /**
  * Runware service configuration
  */
 export interface RunwareConfig {
   apiKey: string
-  shouldReconnect?: boolean
-  globalMaxRetries?: number
-  timeoutDuration?: number
-  url?: string
+  baseUrl?: string
 }
 
 /**
@@ -123,61 +82,89 @@ export interface RunwareVideoParams {
 }
 
 /**
+ * Runware REST API Response
+ */
+interface RunwareResponse {
+  data: Array<{
+    taskUUID: string
+    imageURL?: string
+    videoURL?: string
+    imageUUID?: string
+    videoUUID?: string
+    cost?: number
+    NSFWContent?: boolean
+  }>
+  error?: string
+}
+
+/**
  * Runware Service Class
- * Handles both image and video generation using the official SDK
+ * Handles both image and video generation using REST API
  */
 export class RunwareService {
-  private runware: Runware
-  private isConnected: boolean = false
-  private connectionPromise: Promise<void> | null = null
+  private apiKey: string
+  private baseUrl: string
 
   constructor(config: RunwareConfig) {
-    this.runware = new Runware({
-      apiKey: config.apiKey,
-      shouldReconnect: config.shouldReconnect ?? true,
-      globalMaxRetries: config.globalMaxRetries ?? 3,
-      timeoutDuration: config.timeoutDuration ?? 90000, // 90 seconds default
-      ...(config.url && { url: config.url })
-    })
+    this.apiKey = config.apiKey
+    this.baseUrl = config.baseUrl || 'https://api.runware.ai/v1'
   }
 
   /**
-   * Ensure connection is established
-   * Uses singleton pattern to prevent multiple connection attempts
+   * Make REST API request to Runware
    */
-  async ensureConnection(): Promise<void> {
-    if (this.isConnected) {
-      return
-    }
-
-    if (this.connectionPromise) {
-      return this.connectionPromise
-    }
-
-    this.connectionPromise = (async () => {
-      try {
-        await this.runware.ensureConnection()
-        this.isConnected = true
-        console.log('Runware WebSocket connection established')
-      } catch (error) {
-        this.connectionPromise = null
-        throw new Error(`Failed to connect to Runware: ${error}`)
+  private async makeRequest(tasks: any[]): Promise<RunwareResponse> {
+    console.log(`[Runware REST] Making request to ${this.baseUrl}`)
+    console.log(`[Runware REST] Number of tasks: ${tasks.length}`)
+    
+    // Log each task's structure for debugging
+    tasks.forEach((task, index) => {
+      console.log(`[Runware REST] Task ${index} type: ${task.taskType}`)
+      console.log(`[Runware REST] Task ${index} fields:`, Object.keys(task).join(', '))
+      
+      // Check for invalid fields that shouldn't be there
+      // NOTE: taskUUID is REQUIRED by Runware API, so it's NOT in this list
+      const invalidFields = ['taskId', 'response_format', 'userId', 'apiKeyId', 'ip']
+      const foundInvalid = invalidFields.filter(field => field in task)
+      if (foundInvalid.length > 0) {
+        console.error(`[Runware REST] WARNING: Found invalid fields in task: ${foundInvalid.join(', ')}`)
       }
-    })()
+    })
+    
+    console.log(`[Runware REST] Full request body:`, JSON.stringify(tasks, null, 2))
 
-    return this.connectionPromise
+    const response = await fetch(this.baseUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(tasks)
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[Runware REST] Error response (${response.status}):`, errorText)
+      throw new Error(`Runware API error (${response.status}): ${errorText}`)
+    }
+
+    const result = await response.json()
+    console.log(`[Runware REST] Success response:`, JSON.stringify(result, null, 2))
+
+    return result
   }
 
   /**
-   * Generate images using Runware SDK
-   * Supports progressive delivery via onPartialImages callback
+   * Generate images using Runware REST API
    */
   async generateImage(params: RunwareImageParams): Promise<{
     created: number
     data: Array<{ url?: string; b64_json?: string; revised_prompt?: string | null }>
     cost?: number
   }> {
-    await this.ensureConnection()
+    console.log(`[Runware Generate] Starting REST API image generation`)
+    console.log(`[Runware Generate] Received params keys:`, Object.keys(params).join(', '))
+    console.log(`[Runware Generate] Model: ${params.model}, Prompt: ${params.prompt.substring(0, 100)}...`)
 
     // Handle special operations first
     if (params.removeBackground && params.inputImage) {
@@ -200,180 +187,134 @@ export class RunwareService {
       }
     }
 
-    // Build Runware request
-    const request: IImageInference = {
+    // Generate a proper UUID v4 for this Runware task (REQUIRED by Runware API)
+    const taskUUID = crypto.randomUUID()
+    
+    // Build Runware REST API request - ONLY include valid Runware fields
+    const task: any = {
+      taskType: 'imageInference',
+      taskUUID: taskUUID, // REQUIRED by Runware API - must be UUID v4
       positivePrompt: params.prompt,
       model: params.model,
       width,
       height,
       numberResults: params.n || 1,
       outputFormat: 'PNG',
+      outputType: ['URL'],
       includeCost: params.includeCost ?? true
     }
+    
+    console.log(`[Runware Generate] Generated taskUUID for Runware: ${taskUUID}`)
 
     // Add optional parameters
-    if (params.negativePrompt) request.negativePrompt = params.negativePrompt
-    if (params.steps) request.steps = params.steps
-    if (params.seed) request.seed = params.seed
-    if (params.guidance) request.CFGScale = params.guidance
-    if (params.scheduler) request.scheduler = params.scheduler as any
-    if (params.lora) request.lora = params.lora
+    if (params.negativePrompt) task.negativePrompt = params.negativePrompt
+    if (params.steps) task.steps = params.steps
+    if (params.seed) task.seed = params.seed
+    if (params.guidance) task.CFGScale = params.guidance
+    if (params.scheduler) task.scheduler = params.scheduler
+    if (params.lora) task.lora = params.lora
 
     // Image-to-image
     if (params.inputImage) {
-      request.seedImage = params.inputImage
-      request.strength = params.strength || 0.8
+      task.seedImage = params.inputImage
+      task.strength = params.strength || 0.8
     }
 
     // Inpainting
     if (params.maskImage) {
-      request.maskImage = params.maskImage
+      task.maskImage = params.maskImage
     }
 
     // ControlNet
     if (params.controlNet) {
-      request.controlNet = params.controlNet.map(cn => ({
-        model: cn.model,
-        weight: cn.weight,
-        preprocessor: cn.preprocessor as any,
-        guideImage: cn.guideImage
-      }))
+      task.controlNet = params.controlNet
     }
 
     try {
-      // Use SDK's requestImages method with progressive delivery support
-      const images: IImage[] = await this.runware.requestImages(request)
+      const result = await this.makeRequest([task])
+
+      if (!result.data || result.data.length === 0) {
+        throw new Error('No images returned from Runware API')
+      }
 
       // Transform to OpenAI-compatible format
       return {
         created: Math.floor(Date.now() / 1000),
-        data: images.map(img => ({
-          url: img.imageURL,
+        data: result.data.map(item => ({
+          url: item.imageURL,
           revised_prompt: null
         })),
-        cost: images[0]?.cost || 0
+        cost: result.data[0]?.cost || 0
       }
     } catch (error) {
+      console.error(`[Runware REST] Image generation failed:`, error)
       throw new Error(`Runware image generation failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
   /**
-   * Generate images with progressive delivery
-   * Calls onPartialImages callback as images complete
-   */
-  async generateImageWithProgress(
-    params: RunwareImageParams,
-    onPartialImages: (images: IImage[], error: IError | null) => void
-  ): Promise<{
-    created: number
-    data: Array<{ url?: string; b64_json?: string; revised_prompt?: string | null }>
-    cost?: number
-  }> {
-    await this.ensureConnection()
-
-    // Extract dimensions
-    let width = params.width || 1024
-    let height = params.height || 1024
-
-    if (params.size) {
-      const match = params.size.match(/(\d+)x(\d+)/)
-      if (match) {
-        width = parseInt(match[1])
-        height = parseInt(match[2])
-      }
-    }
-
-    // Build request
-    const request: IImageInference = {
-      positivePrompt: params.prompt,
-      model: params.model,
-      width,
-      height,
-      numberResults: params.n || 1,
-      outputFormat: 'PNG',
-      includeCost: params.includeCost ?? true,
-      onPartialImages
-    }
-
-    // Add optional parameters
-    if (params.negativePrompt) request.negativePrompt = params.negativePrompt
-    if (params.steps) request.steps = params.steps
-    if (params.seed) request.seed = params.seed
-    if (params.guidance) request.CFGScale = params.guidance
-
-    try {
-      const images: IImage[] = await this.runware.requestImages(request)
-
-      return {
-        created: Math.floor(Date.now() / 1000),
-        data: images.map(img => ({
-          url: img.imageURL,
-          revised_prompt: null
-        })),
-        cost: images[0]?.cost || 0
-      }
-    } catch (error) {
-      throw new Error(`Runware image generation failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  /**
-   * Generate video using Runware SDK
-   * Automatically handles async processing and polling
-   * Supports text-to-video and image-to-video (frameImages)
+   * Generate video using Runware REST API
    */
   async generateVideo(params: RunwareVideoParams): Promise<{
     created: number
     data: Array<{ url?: string; b64_json?: string; revised_prompt?: string | null }>
     cost?: number
   }> {
-    await this.ensureConnection()
+    console.log(`[Runware Video] Starting REST API video generation`)
+    console.log(`[Runware Video] Model: ${params.model}, Duration: ${params.duration}s`)
 
+    // Generate a proper UUID v4 for this Runware task (REQUIRED by Runware API)
+    const taskUUID = crypto.randomUUID()
+    
     // Build video request
-    const request: IVideoInference = {
+    const task: any = {
+      taskType: 'videoInference',
+      taskUUID: taskUUID, // REQUIRED by Runware API - must be UUID v4
       positivePrompt: params.prompt,
       model: params.model,
       duration: params.duration,
-      width: params.width || 1280,
-      height: params.height || 720,
+      width: params.width || 864,
+      height: params.height || 480,
+      fps: params.fps || 24,
       outputFormat: 'mp4',
-      includeCost: params.includeCost ?? true
+      numberResults: 1,
+      includeCost: params.includeCost ?? true,
+      outputQuality: 85
     }
+    
+    console.log(`[Runware Video] Generated taskUUID for Runware: ${taskUUID}`)
 
     // Add optional parameters
-    if (params.negativePrompt) request.negativePrompt = params.negativePrompt
-    if (params.seed) request.seed = params.seed
+    if (params.negativePrompt) task.negativePrompt = params.negativePrompt
+    if (params.seed) task.seed = params.seed
     
     // Add frameImages for image-to-video
     if (params.frameImages && params.frameImages.length > 0) {
-      // Cast to any to bypass type restrictions (SDK may not have this typed yet)
-      (request as any).frameImages = params.frameImages
-    }
-    
-    // Add FPS if specified
-    if (params.fps) {
-      (request as any).fps = params.fps
+      task.referenceImages = params.frameImages.map(f => f.inputImage)
     }
     
     // Add provider-specific settings
     if (params.providerSettings) {
-      (request as any).providerSettings = params.providerSettings
+      task.providerSettings = params.providerSettings
     }
 
     try {
-      // SDK handles all async complexity automatically
-      const videos: IVideo[] = await this.runware.videoInference(request)
+      const result = await this.makeRequest([task])
+
+      if (!result.data || result.data.length === 0) {
+        throw new Error('No videos returned from Runware API')
+      }
 
       return {
         created: Math.floor(Date.now() / 1000),
-        data: videos.map(video => ({
-          url: video.videoURL,
+        data: result.data.map(item => ({
+          url: item.videoURL,
           revised_prompt: null
         })),
-        cost: videos[0]?.cost || 0
+        cost: result.data[0]?.cost || 0
       }
     } catch (error) {
+      console.error(`[Runware REST] Video generation failed:`, error)
       throw new Error(`Runware video generation failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
@@ -390,22 +331,26 @@ export class RunwareService {
       throw new Error('inputImage is required for background removal')
     }
 
-    const request: IRemoveImageBackground = {
+    const taskUUID = crypto.randomUUID()
+    const task = {
+      taskType: 'imageBackgroundRemoval',
+      taskUUID: taskUUID,
       inputImage: params.inputImage,
       outputFormat: 'PNG',
+      outputType: ['URL'],
       includeCost: params.includeCost ?? true
     }
 
     try {
-      const images: IImage[] = await this.runware.removeImageBackground(request)
+      const result = await this.makeRequest([task])
 
       return {
         created: Math.floor(Date.now() / 1000),
-        data: images.map(img => ({
-          url: img.imageURL,
+        data: result.data.map(item => ({
+          url: item.imageURL,
           revised_prompt: null
         })),
-        cost: images[0]?.cost || 0
+        cost: result.data[0]?.cost || 0
       }
     } catch (error) {
       throw new Error(`Runware background removal failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -424,23 +369,27 @@ export class RunwareService {
       throw new Error('inputImage is required for upscaling')
     }
 
-    const request: IUpscaleGan = {
+    const taskUUID = crypto.randomUUID()
+    const task = {
+      taskType: 'imageUpscale',
+      taskUUID: taskUUID,
       inputImage: params.inputImage,
       upscaleFactor: params.upscaleFactor || 4,
       outputFormat: 'PNG',
+      outputType: ['URL'],
       includeCost: params.includeCost ?? true
     }
 
     try {
-      const images: IImage[] = await this.runware.upscaleGan(request)
+      const result = await this.makeRequest([task])
 
       return {
         created: Math.floor(Date.now() / 1000),
-        data: images.map(img => ({
-          url: img.imageURL,
+        data: result.data.map(item => ({
+          url: item.imageURL,
           revised_prompt: null
         })),
-        cost: images[0]?.cost || 0
+        cost: result.data[0]?.cost || 0
       }
     } catch (error) {
       throw new Error(`Runware upscaling failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -451,38 +400,19 @@ export class RunwareService {
    * Extract text from image (OCR/Image-to-text)
    */
   async imageToText(inputImage: string): Promise<string> {
-    await this.ensureConnection()
-
-    const request: IImageToText = {
+    const taskUUID = crypto.randomUUID()
+    const task = {
+      taskType: 'imageCaption',
+      taskUUID: taskUUID,
       inputImage
     }
 
     try {
-      const results = await this.runware.requestImageToText(request)
-      return results[0]?.text || ''
+      const result = await this.makeRequest([task])
+      return (result.data[0] as any)?.text || ''
     } catch (error) {
       throw new Error(`Runware image-to-text failed: ${error instanceof Error ? error.message : String(error)}`)
     }
-  }
-
-  /**
-   * Disconnect from Runware
-   * Clean shutdown of WebSocket connection
-   */
-  async disconnect(): Promise<void> {
-    if (this.isConnected) {
-      await this.runware.disconnect()
-      this.isConnected = false
-      this.connectionPromise = null
-      console.log('Runware WebSocket connection closed')
-    }
-  }
-
-  /**
-   * Check if connection is active
-   */
-  get connected(): boolean {
-    return this.isConnected
   }
 }
 
@@ -499,7 +429,7 @@ export function createRunwareService(apiKey: string, config?: Partial<RunwareCon
 
 /**
  * Singleton instance for Cloudflare Workers
- * Reuses connection across requests
+ * Reuses instance across requests (no connection needed with REST API)
  */
 let runwareInstance: RunwareService | null = null
 
@@ -508,7 +438,8 @@ let runwareInstance: RunwareService | null = null
  * Singleton pattern for Cloudflare Workers environment
  */
 export function getRunwareService(apiKey: string, config?: Partial<RunwareConfig>): RunwareService {
-  if (!runwareInstance || !runwareInstance.connected) {
+  if (!runwareInstance) {
+    console.log('[Runware Service] Creating new REST API service instance')
     runwareInstance = createRunwareService(apiKey, config)
   }
   return runwareInstance

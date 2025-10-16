@@ -759,20 +759,21 @@ async function generateRunwareVideo(
     // Import Runware service
     const { getRunwareService } = await import('./runwareService')
 
-    // Get or create Runware service instance (singleton pattern)
-    const runwareService = getRunwareService(providerKey, {
-      shouldReconnect: true,
-      globalMaxRetries: 3,
-      timeoutDuration: 180000 // 3 minutes for video generation
-    })
+    console.log('[Runware Video] Creating REST API service instance...')
+    
+    // Get or create Runware service instance (REST API - no connection needed)
+    const runwareService = getRunwareService(providerKey)
+    
+    console.log('[Runware Video] REST API service instance ready')
 
     // Build Runware video request parameters
     const runwareParams: any = {
       model: params.model,
       prompt: params.prompt,
       duration: params.duration || 5, // Default 5 seconds
-      width: params.width || 1280,
-      height: params.height || 720,
+      width: params.width || 864,
+      height: params.height || 480,
+      fps: 24,
       includeCost: true,
       response_format: params.response_format || 'url'
     }
@@ -781,8 +782,10 @@ async function generateRunwareVideo(
     if (params.negativePrompt) runwareParams.negativePrompt = params.negativePrompt
     if (params.seed) runwareParams.seed = params.seed
 
-    // Generate video using Runware SDK
+    // Generate video using Runware REST API
+    console.log('[Runware Video] Calling runwareService.generateVideo()...')
     const result = await runwareService.generateVideo(runwareParams)
+    console.log(`[Runware Video] ✓ Generation successful, received ${result.data.length} videos`)
 
     return result
   } catch (error) {
