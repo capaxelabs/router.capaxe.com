@@ -1,20 +1,24 @@
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import { CloudflareBindings, ContextVariables } from '../types/env'
-import { createImageGenerationHandler } from '../services/generationWrapper'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
-import { ImageGenerationRequest, ImageGenerationResponse, validateImageRequest } from '../lib/validation'
+import { ImageGenerationRequest, validateImageRequest } from '../lib/validation'
 import type { NewApiUsage } from '../db/schema'
 import { createQueueService } from '../services/queueService'
+import { googleImageModels } from '../shared/imageModels/google'
+import { runwareImageModels } from '../shared/imageModels/runware'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
-// Create the generation handler with usage logging
-const imageGenerationHandler = createImageGenerationHandler()
+/**
+ * POST /v1/images/generations  
+ * Generate images using async queue (Google & Runware models)
+ * Always returns immediately with task ID for status polling
+ */
 
 /**
- * POST /v1/openai/images/generations
+ * POST /v1/images/generations
  * Generate images using Google models with usage logging
  */
 app.post('/generations', 
@@ -42,10 +46,6 @@ app.post('/generations',
       const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
       
-      // Check if sync mode is requested (async is now default)
-      const isSync = c.req.query('sync') === 'true'
-      const isAsync = !isSync
-      
       // Create request with potential file data or base64 data
       const requestData: any = { ...validatedData }
       
@@ -66,92 +66,86 @@ app.post('/generations',
         requestData.files = parsedFiles
       }
 
-      if (isAsync) {
-        // ASYNC MODE: Create task and return immediately
-        try {
-          const queueService = createQueueService(c)
-          const { taskId } = await queueService.createAsyncTask('image', authenticatedUser!.id, {
-            model: validatedData.model,
-            prompt: validatedData.prompt,
-            imageSize: validatedData.size,
-            quality: validatedData.quality,
-            apiKeyId: authenticatedUser!.apiKeyId,
-            ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
-            ...requestData // Include all request data
-          })
-
-          return c.json({
-            taskId,
-            status: 'pending',
-            type: 'image',
-            createdAt: Date.now(),
-            message: 'Image generation task created. Use GET /v1/tasks/:taskId to check status.'
-          })
-
-        } catch (queueError) {
-          console.error('Failed to create async task:', queueError)
-          
-          // Log the error to database if possible
-          try {
-            const db = c.get('db')
-            if (db) {
-              const { generateTaskId } = await import('../services/taskIdGenerator')
-              const { apiUsage } = await import('../db/schema')
-              
-              const taskId = generateTaskId('image', authenticatedUser!.id)
-              const errorUsage: NewApiUsage = {
-                id: `usage_${taskId}`,
-                model: validatedData.model,
-                provider: 'error',
-                prompt: validatedData.prompt,
-                cost: 0,
-                speedMs: 0,
-                imageSize: validatedData.size || '1024x1024',
-                quality: validatedData.quality as any || 'auto',
-                status: 'failed',
-                error: `Async queue not available: ${(queueError as Error).message}`,
-                outputUrls: '[]',
-                userId: authenticatedUser!.id,
-                apiKeyId: authenticatedUser!.apiKeyId,
-                ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
-                taskId,
-                taskStatus: 'failed',
-                taskProgress: 0,
-                isAsync: true,
-              }
-              
-              await db.insert(apiUsage).values(errorUsage)
-              console.log(`Logged async error for task ${taskId}`)
-            }
-          } catch (dbError) {
-            console.error('Failed to log async error to database:', dbError)
+      // ASYNC MODE ONLY: Validate model exists before creating task
+      const allImageModels = { ...googleImageModels, ...runwareImageModels }
+      
+      if (!allImageModels[validatedData.model]) {
+        return c.json({
+          error: {
+            message: `Model '${validatedData.model}' not found. Use GET /v1/models to see available models.`,
+            type: 'invalid_model',
+            param: 'model'
           }
-          
-          return c.json({
-            error: {
-              message: 'Async processing not available in local development. Please add ?sync=true for synchronous generation or deploy to Cloudflare.',
-              type: 'async_unavailable',
-              details: (queueError as Error).message
+        }, 400)
+      }
+      
+      // Create task and return immediately
+      try {
+        const queueService = createQueueService(c)
+        const { taskId } = await queueService.createAsyncTask('image', authenticatedUser!.id, {
+          model: validatedData.model,
+          prompt: validatedData.prompt,
+          imageSize: validatedData.size,
+          quality: validatedData.quality,
+          apiKeyId: authenticatedUser!.apiKeyId,
+          ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
+          ...requestData // Include all request data
+        })
+
+        return c.json({
+          taskId,
+          status: 'pending',
+          type: 'image',
+          createdAt: Date.now(),
+          message: 'Image generation task created. Use GET /v1/tasks/:taskId to check status.'
+        })
+
+      } catch (queueError) {
+        console.error('Failed to create async task:', queueError)
+        
+        // Log the error to database if possible
+        try {
+          const db = c.get('db')
+          if (db) {
+            const { generateTaskId } = await import('../services/taskIdGenerator')
+            const { apiUsage } = await import('../db/schema')
+            
+            const taskId = generateTaskId('image', authenticatedUser!.id)
+            const errorUsage: NewApiUsage = {
+              id: `usage_${taskId}`,
+              model: validatedData.model,
+              provider: 'error',
+              prompt: validatedData.prompt,
+              cost: 0,
+              speedMs: 0,
+              imageSize: validatedData.size || '1024x1024',
+              quality: validatedData.quality as any || 'auto',
+              status: 'failed',
+              error: `Async queue not available: ${(queueError as Error).message}`,
+              outputUrls: '[]',
+              userId: authenticatedUser!.id,
+              apiKeyId: authenticatedUser!.apiKeyId,
+              ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
+              taskId,
+              taskStatus: 'failed',
+              taskProgress: 0,
+              isAsync: true,
             }
-          }, 503) // Service Unavailable
+            
+            await db.insert(apiUsage).values(errorUsage)
+            console.log(`Logged async error for task ${taskId}`)
+          }
+        } catch (dbError) {
+          console.error('Failed to log async error to database:', dbError)
         }
         
-      } else {
-        // SYNC MODE: Process immediately (existing behavior)
-        const result = await imageGenerationHandler(c, requestData)
-
-        // Return in OpenAI-compatible format
-        const response: ImageGenerationResponse = {
-          created: result.created,
-          data: result.data.map(item => ({
-            url: item.url,
-            b64_json: item.b64_json,
-            revised_prompt: item.revised_prompt || undefined
-          })),
-          cost: result.cost
-        }
-
-        return c.json(response)
+        return c.json({
+          error: {
+            message: 'Async processing not available. Please deploy to Cloudflare Workers to enable queue-based async processing.',
+            type: 'async_unavailable',
+            details: (queueError as Error).message
+          }
+        }, 503) // Service Unavailable
       }
 
     } catch (error: unknown) {
@@ -184,7 +178,7 @@ app.post('/generations',
 )
 
 /**
- * POST /v1/openai/images/edits
+ * POST /v1/images/edits
  * Edit images using Google models (for models that support it)
  */
 app.post('/edits',
@@ -324,7 +318,7 @@ app.post('/edits',
 )
 
 /**
- * POST /v1/openai/images/variations
+ * POST /v1/images/variations
  * Create variations of images (placeholder for future implementation)
  */
 app.post('/variations', async (c) => {

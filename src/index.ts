@@ -46,7 +46,7 @@ app.get('/', (c) => {
 })
 
 // Import routes
-import modelsRoutes from './routes/models'
+import modelsRoutes from './routes/models.js'
 import imageRoutes from './routes/images'
 import videoRoutes from './routes/videos'
 import adminRoutes from './routes/admin'
@@ -59,11 +59,14 @@ app.route('/v1/models', modelsRoutes)
 // Models HTML page at /models
 app.route('/models', modelsRoutes)
 
+// Static files served from public directory via Cloudflare Workers Assets
+// Configured in wrangler.jsonc: assets = { directory = "public" }
+
 // Image generation routes
-app.route('/v1/openai/images', imageRoutes)
+app.route('/v1/images', imageRoutes)
 
 // Video generation routes
-app.route('/v1/openai/videos', videoRoutes)
+app.route('/v1/videos', videoRoutes)
 
 // Task management routes for async processing
 app.route('/v1/tasks', taskRoutes)
@@ -74,9 +77,7 @@ app.route('/tasks', tasksPage)
 // Admin routes for database seeding and management
 app.route('/admin', adminRoutes)
 
-// Placeholder routes for Phase 3 (Bytedance models) and authentication
-// These will be implemented in the next phases
-
+// Placeholder routes for authentication (future implementation)
 // app.route('/v1/auth', authRoutes)
 
 // Handle 404s

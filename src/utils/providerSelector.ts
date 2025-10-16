@@ -1,3 +1,14 @@
+
+
+
+export interface ModelData {
+  id: string
+  providers: Provider[]
+  arena_score?: number
+  release_date?: string
+  examples?: Array<{ image?: string; video?: string }>
+}
+
 /**
  * Provider interface
  */
@@ -48,51 +59,17 @@ export function selectProvider(providers: Provider[], requestParams: RequestPara
     throw new Error('No providers supplied to selectProvider()')
   }
 
-  // Detect model identifier (can be plain or namespaced like 'openai/gpt-image-1')
-  const modelId = requestParams.model || ''
-
-  // Heuristic to detect whether the caller supplied an input image (file upload or URL/B64)
-  const hasInputImage = Boolean(
-    requestParams.image ||
-    (requestParams.files && (requestParams.files.image || requestParams.files['image[]']))
-  )
-
-  // Determine desired provider ID under special-case rules
-  let desiredProviderId = providers[0].id
-
-  // Special-case selection for GPT-Image-1
-  if (modelId === 'openai/gpt-image-1') {
-    // If an input image is provided we need the OpenAI provider (supports edits),
-    // otherwise we prefer NanoGPT which is cheaper for pure text-to-image.
-    desiredProviderId = hasInputImage ? 'openai' : 'nanogpt'
-  }
-  // Special-case selection for Seedream-3/4
-  if (modelId === 'bytedance/seedream-v3' || modelId === 'bytedance/seedream-v4') {
-    // Prefer NanoGPT for pure text-to-image; use RunWare when an input image is supplied
-    desiredProviderId = hasInputImage ? 'runware' : 'nanogpt'
-  }
-
-  // Special-case selection for Seedance video models
-  if (modelId === 'bytedance/seedance-1-pro' || modelId === 'bytedance/seedance-1-lite') {
-    // Priority: Runware (fastest) > Replicate (balanced) > WaveSpeed (fallback)
-    if (hasInputImage) {
-      // For image-to-video, prefer providers with better I2V support
-      desiredProviderId = 'runware' // Best I2V performance
-    } else {
-      // For text-to-video, consider cost and speed
-      desiredProviderId = 'replicate' // Good balance of cost and quality
-    }
-  }
-
   // Special-case selection based on user preferences or request parameters
   if (requestParams.provider) {
     // Allow explicit provider selection via API parameter
-    desiredProviderId = requestParams.provider
+    const idx = providers.findIndex(p => p.id === requestParams.provider)
+    if (idx !== -1) {
+      return idx
+    }
   }
 
-  // Find index of desired provider; fallback to 0 if not found
-  const idx = providers.findIndex(p => p.id === desiredProviderId)
-  return idx === -1 ? 0 : idx
+  // Default: return first provider (Google or Runware based on model definition)
+  return 0
 }
 
 export default selectProvider

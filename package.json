@@ -8,12 +8,15 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "db:seed-models": "tsx src/db/seeds/migrateModelsToDb.ts",
+    "db:verify-models": "tsx src/db/seeds/verifyModels.ts"
   },
   "dependencies": {
     "@google/genai": "^1.20.0",
     "@hono/zod-validator": "^0.4.1",
     "@libsql/client": "^0.14.0",
+    "@runware/sdk-js": "^1.1.47",
     "cuid": "^3.0.0",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.9.8",
@@ -22,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.28.1",
+    "tsx": "^4.20.6",
     "wrangler": "^4.4.0"
   }
 }

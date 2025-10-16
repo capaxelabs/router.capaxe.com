@@ -1,14 +1,14 @@
 import { googleImageModels } from './imageModels/google'
 import { googleVideoModels } from './videoModels/google'
-import { bytedanceImageModels } from './imageModels/bytedance'
-import { bytedanceVideoModels } from './videoModels/bytedance'
+import { runwareImageModels } from './imageModels/runware'
+import { runwareVideoModels } from './videoModels/runware'
 import { PRICING_TYPES } from './PricingScheme'
 
 const models = {
   ...googleImageModels,
   ...googleVideoModels,
-  ...bytedanceImageModels,
-  ...bytedanceVideoModels
+  ...runwareImageModels,
+  ...runwareVideoModels
 }
 
 /**

@@ -1,6 +1,6 @@
 import { PRICING_TYPES } from '../../PricingScheme'
 import { processSingleFile } from '../../../lib/imageHelpers'
-import { ModelData } from '../../imageModels/google/imagen-3'
+import { ModelData } from '../../../utils/providerSelector'
 
 class Veo2Mock {
   data: ModelData

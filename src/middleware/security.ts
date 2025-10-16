@@ -32,7 +32,7 @@ export const securityHeaders = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
     styleSrc: ["'self'", "'unsafe-inline'"],
-    scriptSrc: ["'self'"],
+    scriptSrc: ["'self'"], // Only allow scripts from same origin (removed unsafe-inline)
     imgSrc: ["'self'", "data:", "https:"],
     connectSrc: ["'self'", "https:"],
     fontSrc: ["'self'"],

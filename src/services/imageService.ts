@@ -1,14 +1,13 @@
 import { Context } from 'hono'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleImageModels } from '../shared/imageModels/google'
-import { bytedanceImageModels } from '../shared/imageModels/bytedance'
 import { runwareImageModels } from '../shared/imageModels/runware'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
 import { createStorageService } from '../lib/storage'
 import { extractWidthHeight } from '../lib/imageHelpers'
 import { ImageGenerationRequest, ImageGenerationResponse } from '../lib/validation'
-import { pollReplicatePrediction } from './replicateUtils'
+
 
 export interface ImageGenerationParams extends ImageGenerationRequest {
   files?: {
@@ -31,6 +30,7 @@ export interface GenerationResult {
   }>
   latency?: number
   cost?: number
+  provider?: string
 }
 
 /**
@@ -43,8 +43,8 @@ export async function generateImage(
 ): Promise<GenerationResult> {
   const startTime = Date.now()
   
-  // Get model configuration from Google, Bytedance, and Runware models
-  const allImageModels = { ...googleImageModels, ...bytedanceImageModels, ...runwareImageModels }
+  // Get model configuration from Google and Runware models
+  const allImageModels = { ...googleImageModels, ...runwareImageModels }
   const modelConfig = allImageModels[params.model]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
@@ -91,20 +91,6 @@ export async function generateImage(
     case 'vertex':
       result = await generateVertex(c, { ...processedParams, model: actualModel }, userId)
       break
-    case 'openrouter':
-      result = await generateOpenRouter(c, { ...processedParams, model: actualModel }, userId)
-      break
-    case 'replicate':
-      // Replicate defaults to async mode for production scalability
-      if (c.req.query('async') === 'false') {
-        // Only allow sync mode when explicitly requested (for testing/development)
-        console.warn('Sync mode used for Replicate - not recommended for production')
-        result = await generateReplicate(c, { ...processedParams, model: actualModel }, userId)
-      } else {
-        // Default to async mode - handled by queue consumer
-        throw new Error('Async image generation should be handled by queue consumer')
-      }
-      break
     case 'runware':
       // Runware defaults to async mode for production scalability
       if (c.req.query('async') === 'false') {
@@ -121,6 +107,7 @@ export async function generateImage(
   }
 
   result.latency = Date.now() - startTime
+  result.provider = selectedProvider.id
 
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
@@ -315,266 +302,89 @@ async function generateVertex(
 }
 
 /**
- * Generate images using OpenRouter (for Gemini models)
- */
-async function generateOpenRouter(
-  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
-  params: ImageGenerationParams & { model: string },
-  userId: string
-): Promise<GenerationResult> {
-  const providerKey = c.env.OPENROUTER_API_KEY
-  if (!providerKey) {
-    throw new Error('OpenRouter API key not configured')
-  }
-
-  const providerUrl = 'https://openrouter.ai/api/v1/chat/completions'
-
-  const messages: any[] = [{
-    role: 'user',
-    content: params.prompt
-  }]
-
-  // Add image data if available
-  if (params.imagesData && params.imagesData.length > 0) {
-    const imageContent = params.imagesData.map(imageData => ({
-      type: 'image_url',
-      image_url: { url: imageData }
-    }))
-    
-    messages[0].content = [
-      { type: 'text', text: params.prompt },
-      ...imageContent
-    ]
-  }
-
-  const requestBody = {
-    model: params.model,
-    messages: messages,
-    max_tokens: 1000,
-  }
-
-  const response = await fetch(providerUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${providerKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://imagerouter.io',
-      'X-Title': 'ImageRouter'
-    },
-    body: JSON.stringify(requestBody)
-  })
-
-  if (!response.ok) {
-    const errorData = await response.text()
-    throw new Error(`OpenRouter request failed: ${errorData}`)
-  }
-
-  const data = await response.json()
-
-  // OpenRouter returns chat completion format, need to extract images
-  // This is a simplified implementation
-  if (data.choices?.[0]?.message?.content) {
-    // Parse content for image data - this would need proper implementation
-    throw new Error('OpenRouter image extraction not fully implemented')
-  } else {
-    throw new Error('No content in OpenRouter response')
-  }
-}
-
-/**
- * Process image generation result through storage
- */
-/**
- * Generate images using Replicate API
- */
-async function generateReplicate(
-  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
-  params: ImageGenerationParams & { model: string },
-  userId: string
-): Promise<GenerationResult> {
-  const providerUrl = `https://api.replicate.com/v1/models/${params.model}/predictions`
-  const providerKey = c.env.REPLICATE_API_KEY
-
-  if (!providerKey) {
-    throw new Error('REPLICATE_API_KEY environment variable is required')
-  }
-
-  // Build the input object starting with the prompt
-  const input: Record<string, any> = {
-    prompt: params.prompt
-  }
-
-  // Add additional parameters from the request
-  if (params.width) input.width = params.width
-  if (params.height) input.height = params.height
-  if (params.n) input.num_outputs = params.n
-  if (params.size) {
-    const { width, height } = extractWidthHeight(params.size)
-    if (width && height) {
-      input.width = width
-      input.height = height
-    }
-  }
-
-  // Add any additional parameters that might be specific to the model
-  Object.keys(params).forEach(key => {
-    if (!['prompt', 'model', 'width', 'height', 'n', 'size', 'files', 'imagesData'].includes(key)) {
-      input[key] = params[key as keyof typeof params]
-    }
-  })
-
-  const requestBody = {
-    input: input
-  }
-
-  const response = await fetch(providerUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${providerKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestBody)
-  })
-
-  if (!response.ok) {
-    const errorData = await response.json()
-    throw new Error(`Replicate API error: ${errorData.detail || response.statusText}`)
-  }
-
-  let data = await response.json()
-
-  // If the prediction is still running, poll until it finishes
-  // Use shorter timeout for images (5 minutes vs 20 minutes for videos)
-  if (data.status !== 'succeeded' || !data.output) {
-    data = await pollReplicatePrediction(data.urls.get, providerKey, {
-      maxAttempts: 60, // 5 minutes at 5-second intervals
-      pollingInterval: 5000
-    })
-  }
-
-  // Handle timeout without throwing so credits are not fully refunded
-  if (data.status === 'timeout' || !data.output) {
-    throw new Error('Prediction timed out on Replicate – please try again later')
-  }
-
-  // Process the output - Replicate typically returns array of URLs
-  const output = Array.isArray(data.output) ? data.output : [data.output]
-  
-  return {
-    created: Math.floor(Date.now() / 1000),
-    data: output.map((url: string) => ({
-      url: url,
-      revised_prompt: null
-    })),
-    cost: data.cost || 0
-  }
-}
-
-/**
- * Generate images using Runware API
+ * Generate images using Runware SDK
+ * Uses the official @runware/sdk-js with WebSocket-based API
  */
 async function generateRunware(
   c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: ImageGenerationParams & { model: string },
   userId: string
 ): Promise<GenerationResult> {
-  const providerUrl = 'https://api.runware.ai/v1'
   const providerKey = c.env.RUNWARE_API_KEY
-  
+
   if (!providerKey) {
     throw new Error('RUNWARE_API_KEY environment variable is required')
   }
 
-  // Generate a unique task UUID for tracking
-  const taskUUID = `task-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
-  const taskType = params.model.includes('runware:110@1') ? 'imageBackgroundRemoval' : 'imageInference'
-
-  // Extract width and height from size parameter
-  const { width, height } = extractWidthHeight(params.size || 'auto')
-
-  // Build the Runware task payload
-  const taskPayload: any = {
-    taskType,
-    taskUUID,
-    positivePrompt: params.prompt,
-    model: params.model,
-    outputFormat: "WEBP",
-    numberResults: params.n || 1,
-    includeCost: true
-  }
-
-  // Set dimensions for non-background-removal models
-  if (!params.model.includes('runware:110@1')) {
-    taskPayload.width = width || 1024
-    taskPayload.height = height || 1024
-  }
-
-  // Add steps if provided
-  if (params.steps) {
-    taskPayload.steps = params.steps
-  }
-
-  // Handle different image types based on processed parameters
-  if (params.referenceImages) {
-    taskPayload.referenceImages = Array.isArray(params.referenceImages) 
-      ? params.referenceImages 
-      : [params.referenceImages]
-  }
-
-  // Background removal support
-  if (params.inputImage) {
-    taskPayload.inputImage = params.inputImage
-  }
-
-  // Image-to-image support
-  if (params.seedImage) {
-    taskPayload.seedImage = params.seedImage
-    taskPayload.strength = typeof params.strength === 'number' ? params.strength : 0.8
-  }
-
-  // Inpainting support (mask)
-  if (params.maskImage) {
-    taskPayload.maskImage = params.maskImage
-  }
-
   try {
-    const response = await fetch(providerUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${providerKey}`
-      },
-      body: JSON.stringify([taskPayload])
+    // Import Runware service
+    const { getRunwareService } = await import('./runwareService')
+
+    // Get or create Runware service instance (singleton pattern)
+    const runwareService = getRunwareService(providerKey, {
+      shouldReconnect: true,
+      globalMaxRetries: 3,
+      timeoutDuration: 90000 // 90 seconds
     })
 
-    const data = await response.json()
+    // Determine if this is a background removal operation
+    const isBackgroundRemoval = params.model.includes('runware:110@1')
 
-    if (!response.ok || !data?.data) {
-      const errorObj = data?.errors?.[0] || {}
-      const formattedError = {
-        status: response.status,
-        statusText: errorObj?.code || 'Error',
-        error: {
-          message: errorObj?.message || 'Runware generation failed',
-          type: errorObj?.code || 'runware_error'
-        },
-        original_response_from_provider: data
-      }
-      throw new Error(JSON.stringify(formattedError))
+    // Extract width and height from size parameter
+    const { width, height } = extractWidthHeight(params.size || 'auto')
+
+    // Build Runware request parameters
+    const runwareParams: any = {
+      model: params.model,
+      prompt: params.prompt,
+      width: width || 1024,
+      height: height || 1024,
+      n: params.n || 1,
+      includeCost: true,
+      response_format: params.response_format || 'url'
     }
 
-    // Locate result corresponding to our taskUUID
-    const taskResult = data.data.find((item: any) => item.taskUUID === taskUUID) || data.data[0]
-    const imageURL = taskResult?.imageURL || null
+    // Add optional parameters
+    if (params.negativePrompt) runwareParams.negativePrompt = params.negativePrompt
+    if (params.steps) runwareParams.steps = params.steps
+    if (params.seed) runwareParams.seed = params.seed
+    if (params.guidance) runwareParams.guidance = params.guidance
+    if (params.scheduler) runwareParams.scheduler = params.scheduler
+    if (params.lora) runwareParams.lora = params.lora
 
-    return {
-      created: Math.floor(Date.now() / 1000),
-      data: [{
-        url: imageURL,
-        revised_prompt: null,
-      }],
-      cost: taskResult?.cost || 0
+    // Handle special operations
+    if (isBackgroundRemoval && params.inputImage) {
+      runwareParams.removeBackground = true
+      runwareParams.inputImage = params.inputImage
     }
+
+    // Image-to-image
+    if (params.seedImage) {
+      runwareParams.inputImage = params.seedImage
+      runwareParams.strength = typeof params.strength === 'number' ? params.strength : 0.8
+    }
+
+    // Inpainting (mask)
+    if (params.maskImage) {
+      runwareParams.maskImage = params.maskImage
+    }
+
+    // ControlNet support
+    if (params.controlNet) {
+      runwareParams.controlNet = params.controlNet
+    }
+
+    // Upscaling
+    if (params.upscale && params.inputImage) {
+      runwareParams.upscale = true
+      runwareParams.inputImage = params.inputImage
+      runwareParams.upscaleFactor = params.upscaleFactor || 4
+    }
+
+    // Generate image using Runware SDK
+    const result = await runwareService.generateImage(runwareParams)
+
+    return result
   } catch (error) {
     const formattedError = {
       status: 500,

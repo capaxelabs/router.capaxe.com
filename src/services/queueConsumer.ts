@@ -79,7 +79,8 @@ async function processQueueMessage(
 
     // Complete the task
     await queueService.completeTask(taskId, {
-      outputUrls: result.data?.map((item: any) => item.url || item.b64_json) || [],
+      // Extract R2 URLs (use _uploadedUrl for b64_json response format)
+      outputUrls: result.data?.map((item: any) => item.url || item._uploadedUrl) || [],
       cost: Math.round((result.cost || 0) * 10000), // Convert to 1e-4 USD units
       speedMs: processingTime,
       provider: result.provider || 'unknown',
@@ -150,6 +151,14 @@ async function processImageTask(
   // Create mock context for the generation service
   const mockContext = {
     env,
+    req: {
+      query: (key: string) => {
+        // Default to url response format for async tasks
+        if (key === 'response_format') return request.response_format || 'url'
+        if (key === 'async') return 'true'
+        return request[key]
+      }
+    },
     get: (key: string) => {
       // Provide necessary context variables
       if (key === 'db') {
@@ -196,6 +205,14 @@ async function processVideoTask(
   // Create mock context for the generation service
   const mockContext = {
     env,
+    req: {
+      query: (key: string) => {
+        // Default to url response format for async tasks
+        if (key === 'response_format') return request.response_format || 'url'
+        if (key === 'async') return 'true'
+        return request[key]
+      }
+    },
     get: (key: string) => {
       if (key === 'db') {
         return createDatabase({
@@ -361,9 +378,31 @@ async function pollGoogleOperation(
             
             let outputUrls: string[] = []
             if (videoResponse.ok) {
+              console.log(`[Queue Video] Video download successful, preparing R2 upload...`)
+              console.log(`[Queue Video] Environment check - STORAGE_BUCKET: ${env.STORAGE_BUCKET ? 'available' : 'MISSING'}, R2_BUCKET_NAME: ${env.R2_BUCKET_NAME || 'MISSING'}, R2_CUSTOM_PUBLIC_URL: ${env.R2_CUSTOM_PUBLIC_URL || 'MISSING'}`)
+              
+              // Upload video to R2 instead of storing as base64
+              const { R2StorageService } = await import('../lib/storage')
+              const storageService = new R2StorageService(
+                env.STORAGE_BUCKET,
+                env.R2_BUCKET_NAME,
+                env.R2_CUSTOM_PUBLIC_URL
+              )
+              
+              console.log(`[Queue Video] Uploading video from ${videoData.videoUri}`)
               const videoBuffer = await videoResponse.arrayBuffer()
-              const base64Video = btoa(String.fromCharCode(...new Uint8Array(videoBuffer)))
-              outputUrls = [base64Video] // Store as base64 for now
+              console.log(`[Queue Video] Video buffer size: ${videoBuffer.byteLength} bytes`)
+              
+              const uploadResult = await storageService.downloadAndUpload(
+                videoData.videoUri,
+                'video/mp4',
+                'video'
+              )
+              
+              outputUrls = [uploadResult.url]
+              console.log(`[Queue Video] ✓ Successfully uploaded video to R2: ${uploadResult.url}`)
+            } else {
+              console.error(`[Queue Video] Video response not OK: ${videoResponse.status} ${videoResponse.statusText}`)
             }
 
             await queueService.completeTask(taskId, {

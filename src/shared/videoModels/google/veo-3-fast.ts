@@ -1,5 +1,5 @@
 import { PRICING_TYPES } from '../../PricingScheme'
-import { ModelData } from '../../imageModels/google/imagen-3'
+import { ModelData } from '../../../utils/providerSelector'
 import { processSingleFile } from '../../../lib/imageHelpers'
 
 class Veo3Fast {

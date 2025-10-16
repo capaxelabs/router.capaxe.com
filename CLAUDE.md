@@ -6,49 +6,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ImageRouter API is a unified proxy service that provides OpenAI-compatible endpoints for multiple AI image and video generation providers. It abstracts away the complexity of different provider APIs, handles authentication, billing, storage, and provides a consistent interface for developers.
 
-### Current Production Architecture
-
-**ImageRouter is currently deployed and being used by:**
-- **Web applications** requiring AI image/video generation
-- **Mobile apps** needing consistent API endpoints  
-- **SaaS platforms** integrating multiple AI providers
-- **Developers** who want OpenAI-style APIs for non-OpenAI models
-
-### Technical Architecture
-
-- **Express Version** (`express/`): Full-featured Node.js API with Prisma PostgreSQL (Legacy)
-- **Hono Version** (`hono/`): Modern Cloudflare Workers API using Drizzle + libSQL with Turso (Target)
+**Current Architecture:** Cloudflare Workers using Hono framework with Drizzle ORM + Turso (libSQL)
 
 **Supported Providers:**
 - **Google**: Gemini 2.0/2.5, Imagen 3/4 series, Veo 2/3 (images & videos)
-- **Bytedance**: Dreamina, InfiniteYou, SeedEdit, Seedream, Seedance (images & videos) 
-- **Replicate**: Any public model via unified interface
-- **Others**: FAL, Runware, OpenRouter, Vertex AI, etc.
+- **Runware**: Stable Diffusion and other image generation models
+
+**Note**: This implementation focuses exclusively on Google and Runware providers. Other providers (Bytedance, OpenAI, Replicate, FAL, Stability AI, etc.) are out of scope.
 
 ## Development Commands
 
-### Express (Legacy)
 ```bash
 # Development
-cd express && npm run dev
-cd express && npm test
-cd express && npm run lint
-cd express && npm run format
+npm run dev                 # Start Cloudflare Workers dev server
+npm run deploy              # Deploy to production with minification
+npm run cf-typegen          # Generate TypeScript types for Cloudflare bindings
 
-# Database
-cd express && npm run prisma:generate
-cd express && npm run prisma:migrate
+# Database (Drizzle + Turso)
+npm run db:generate         # Generate migration files from schema changes
+npm run db:migrate          # Apply migrations to database
+npm run db:studio           # Open Drizzle Studio (visual database browser)
+npm run db:seed             # Seed database with test data
 
-# Production
-cd express && docker compose up
-```
-
-### Hono (Target)
-```bash
-# Development
-cd hono && npm run dev
-cd hono && npm run deploy
-cd hono && npm run cf-typegen
+# Testing
+npm run test                # Run test suite (if configured)
 ```
 
 ## Async-First Architecture
@@ -58,7 +39,7 @@ cd hono && npm run cf-typegen
 ### Request Processing Modes
 
 #### 1. **Async Mode (Default - Recommended)**
-- **Default behavior** - no `async` parameter needed
+- Default behavior - no `async` parameter needed
 - Returns task ID immediately: `{"task_id": "abc123"}`
 - Client polls: `GET /v1/tasks/{task_id}` for completion
 - Uses Cloudflare Queues for distributed processing
@@ -70,7 +51,6 @@ cd hono && npm run cf-typegen
 - Blocks HTTP connection until completion
 - **Not recommended for production** - hits Cloudflare Worker limits
 - Used for testing/development only
-- Automatic warnings logged
 
 ### Queue-Based Processing Flow
 ```
@@ -80,223 +60,401 @@ Client Request → Immediate Task ID → Queue Message → Provider API → Poll
    (async=default)  HTTP 200 OK        Processing      Google       Updates    Available
 ```
 
-### Supported Async Providers
-- **Google Veo**: 5+ minute video generation requires async
-- **Replicate**: Any model (images: 30s-5min, videos: 2-20min)  
-- **Bytedance**: Video models (Seedance) require async
-- **All providers** benefit from async mode in production
+### Key Files for Async Processing
+- [src/services/queueService.ts](src/services/queueService.ts) - Queue message creation and task management
+- [src/services/queueConsumer.ts](src/services/queueConsumer.ts) - Background worker processing
+- [src/services/taskManager.ts](src/services/taskManager.ts) - Task status tracking
+- [src/routes/tasks.ts](src/routes/tasks.ts) - Task polling endpoints
 
-## Migration Focus
+## Core Architecture
 
-**Current Migration Scope**: Google, Bytedance, and Replicate models with async-first architecture
-- **Google Image Models**: All `express/src/shared/imageModels/google/*.js` files
-- **Google Video Models**: All `express/src/shared/videoModels/google/*.js` files  
-- **Bytedance Image Models**: All `express/src/shared/imageModels/bytedance/*.js` files
-- **Bytedance Video Models**: All `express/src/shared/videoModels/bytedance/*.js` files
-- **Replicate Integration**: Universal support for any Replicate model
+### Database Schema ([src/db/schema.ts](src/db/schema.ts))
 
-## Key Architecture Patterns
+**Users Table**
+- `id` (text, PK) - Unique user identifier
+- `credits` (integer) - User credit balance
+- `createdAt`, `updatedAt` (timestamp)
 
-### Model Structure
-Each model is a class with:
-```javascript
+**API Keys Table**
+- `id` (text, PK) - Key identifier
+- `key` (text, unique) - Actual API key
+- `userId` (FK) - Reference to users table
+- `name` (text) - Key description
+- `isActive` (boolean) - Key status
+- `lastUsedAt` (timestamp)
+
+**API Usage Table** (Critical for tracking generations)
+- `id` (text, PK) - Usage record identifier
+- `userId` (FK), `apiKeyId` (FK) - User and key references
+- `model`, `provider` (text) - Model and provider used
+- `prompt` (text) - Generation prompt
+- `cost` (integer) - Cost in 1e-4 USD units
+- `speedMs` (integer) - Generation time
+- `imageSize`, `quality` (text) - Generation parameters
+- `outputUrls` (text) - JSON array of generated asset URLs
+- `status` (text) - Generation status
+- **Async task fields:**
+  - `taskId` (text) - Links to async task
+  - `taskStatus` (enum) - `sync`, `pending`, `processing`, `completed`, `failed`
+  - `taskProgress` (integer) - 0-100 completion percentage
+  - `taskStartedAt`, `taskCompletedAt` (timestamp)
+  - `isAsync` (boolean) - Whether this was an async request
+
+**IMPORTANT**: All generated images/videos are stored in R2 and their URLs are saved to `outputUrls` column as JSON array.
+
+### Model System
+
+**Model Definition Pattern:**
+```typescript
 class ModelName {
-  constructor() {
-    this.data = {
-      id: 'provider/model-name',
-      providers: [{ id, model_name, pricing, applyImage?, applyMask? }],
-      arena_score: number,
-      release_date: 'YYYY-MM-DD',
-      examples: [{ image|video: '/path' }]
-    }
+  data = {
+    id: 'provider/model-name',
+    providers: [
+      {
+        id: 'gemini',
+        model_name: 'actual-api-model-name',
+        pricing: { type: 'FIXED', price: 0.01 },
+        applyImage?: (params) => { /* transform params */ },
+        applyMask?: (params) => { /* transform params */ },
+        applyQuality?: (params) => { /* transform params */ }
+      }
+    ],
+    arena_score: 1350,
+    release_date: '2024-01-01',
+    examples: [{ image: '/path/to/example.png' }]
   }
   getData() { return this.data }
-  async applyImage?(params) { /* transform params for image input */ }
 }
 ```
 
-### Provider System
-- Models support multiple providers (geminiImagen, vertex, fal, runware, etc.)
-- Each provider has different pricing and capabilities
-- Provider selection happens in `providerSelector.js`
+**Model Locations:**
+- Google Image Models: [src/shared/imageModels/google/](src/shared/imageModels/google/)
+- Google Video Models: [src/shared/videoModels/google/](src/shared/videoModels/google/)
+- Runware Image Models: [src/shared/imageModels/runware/](src/shared/imageModels/runware/)
 
-### Pricing Types
-- `FIXED`: Flat rate per generation
-- `CALCULATED`: Based on parameters (size, quality)  
-- `POST_GENERATION`: Determined after completion
+### Provider Selection ([src/utils/providerSelector.ts](src/utils/providerSelector.ts))
 
-### Request Flow (Async-First)
+The system automatically selects the best provider based on:
+1. **API key availability** (checks `c.env.REPLICATE_API_KEY`, `GEMINI_API_KEY`, etc.)
+2. **Feature requirements** (image input, mask support, quality settings)
+3. **Cost optimization** (selects cheapest available provider)
 
-#### Standard Flow (async=default)
-1. Route handler receives request (`/v1/openai/images/generations`)
-2. Upload middleware processes files
-3. Parameter validation and authentication
-4. **Queue message created** → Returns task ID immediately
-5. Queue consumer processes in background:
-   - Provider-specific API calls
-   - Polling for completion
-   - Storage service (R2) for outputs
-   - Database updates with results
-6. Client polls `/v1/tasks/{id}` for completion
+### Storage System ([src/lib/storage.ts](src/lib/storage.ts))
 
-#### Sync Flow (async=false - Development Only)
-1. Route handler receives request with `async=false`
-2. Upload middleware processes files  
-3. Parameter validation and authentication
-4. **Synchronous processing**:
-   - Direct provider API calls
-   - Blocking polling until completion
-   - Storage service (R2) for outputs
-5. Return results directly
+**R2 Storage Integration:**
+- Uses Cloudflare R2 for generated assets
+- **CUID-based filenames** for unique, collision-resistant naming
+- **Date-based folder structure:**
+  - Images: `/images/YYYY/MM/DD/[cuid].ext`
+  - Videos: `/videos/YYYY/MM/DD/[cuid].ext`
+- Public URL format: `https://{R2_CUSTOM_PUBLIC_URL}/images/2025/01/15/cmfyuksaf000000ijet1iryyg.png`
 
-## Cloudflare Workers Constraints
+**Storage Service Methods:**
+```typescript
+storageService.uploadImageToR2(imageData: ArrayBuffer, extension: string): Promise<string>
+storageService.uploadVideoToR2(videoData: ArrayBuffer, extension: string): Promise<string>
+storageService.downloadFromUrl(url: string): Promise<{ data: ArrayBuffer, contentType: string }>
+```
 
-When migrating to Hono:
-- **No Node.js APIs**: Replace `fs`, `path`, `child_process`
-- **No Prisma**: Use Drizzle ORM with libSQL/Turso
-- **File Uploads**: Use Cloudflare's native file handling
-- **Environment**: Access via `c.env` in Hono context
-- **Database**: D1 for SQL, KV for simple key-value, R2 for file storage
-- **External APIs**: Use `fetch()` (already used in Express)
+### Service Layer
 
-## Important Files for Migration
+**Image Generation** ([src/services/imageService.ts](src/services/imageService.ts))
+- `generateImage(c, params, userId)` - Main image generation handler
+- Routes to provider-specific handlers:
+  - `generateGemini()` - Google Gemini API
+  - `generateVertex()` - Google Vertex AI
+  - `generateOpenRouter()` - OpenRouter proxy
+  - `generateReplicate()` - Replicate API (async-first)
+  - `generateRunware()` - Runware API
 
-### Core Services (to migrate)
-- `src/services/imageService.js` → Image generation logic
-- `src/services/videoService.js` → Video generation logic
-- `src/services/imageHelpers.js` → Utility functions
-- `src/services/storageService.js` → File upload/storage
-- `src/utils/providerSelector.js` → Provider selection logic
+**Video Generation** ([src/services/videoService.ts](src/services/videoService.ts))
+- `generateVideo(c, params, userId)` - Main video generation handler
+- Google Veo models require async processing (5+ minute generations)
+- Automatic polling for operation completion
 
-### Model Definitions (Google & Bytedance only)
-- `src/shared/imageModels/google/` → All Google image models
-- `src/shared/imageModels/bytedance/` → All Bytedance image models
-- `src/shared/videoModels/google/` → All Google video models  
-- `src/shared/videoModels/bytedance/` → All Bytedance video models
-- `src/shared/PricingScheme.js` → Pricing constants
+**Usage Logging** ([src/services/usageLogger.ts](src/services/usageLogger.ts))
+- `logUsage(db, record)` - Records generation in `api_usage` table
+- Tracks cost, speed, provider, output URLs
+- Links async tasks with `taskId` field
 
-### Infrastructure
-- `src/middleware/apiKeyMiddleware.js` → API authentication
-- `src/middleware/uploadMiddleware.js` → File handling (needs Cloudflare adaptation)
-- `src/config/database.js` → Database connection (migrate to Drizzle)
+### API Endpoints
 
-## Production Usage & API Compatibility
-
-### How ImageRouter is Used in Production
-
-**ImageRouter serves as a unified AI gateway** providing OpenAI-compatible endpoints for applications that need:
-
-#### **Multi-Provider Support**
-- Single API for Google, Bytedance, Replicate, and 15+ other providers
-- Automatic failover and provider selection
-- Cost optimization across providers
-
-#### **Enterprise Features** 
-- **Authentication**: API key management and user credits
-- **Rate Limiting**: Per-user and per-endpoint throttling
-- **Usage Analytics**: Detailed logging and cost tracking
-- **File Storage**: Automatic R2/S3 integration for generated assets
-
-#### **Developer Experience**
-- **OpenAI-Compatible**: Drop-in replacement for OpenAI API calls
-- **Async-First**: Scalable queue-based processing for long-running tasks
-- **WebUI**: Built-in model browser and testing interface
-- **Error Handling**: Unified error responses across all providers
-
-### API Endpoints (OpenAI-Compatible)
-
-#### **Image Generation**
-```bash
-# Async (Default - Recommended)
+**Image Generation:**
+```
 POST /v1/openai/images/generations
-→ Returns: {"task_id": "abc123"}
-GET /v1/tasks/abc123 → Poll for completion
-
-# Sync (Development Only)  
-POST /v1/openai/images/generations?async=false
-→ Returns: Direct result (may timeout)
+  → Returns: {"task_id": "abc123"} (async) or direct result (sync)
+  → Body: { model, prompt, size, quality, n, response_format, async }
 ```
 
-#### **Video Generation**
-```bash
-# Async (Default - Required for videos)
-POST /v1/openai/videos/generations  
-→ Returns: {"task_id": "xyz789"}
-GET /v1/tasks/xyz789 → Poll for completion
+**Video Generation:**
+```
+POST /v1/openai/videos/generations
+  → Returns: {"task_id": "xyz789"} (always async for videos)
+  → Body: { model, prompt, duration, resolution, response_format }
 ```
 
-#### **Other Endpoints**
-- `POST /v1/openai/images/edits` - Image editing/inpainting
-- `GET /v1/models` - List available models (filtered by provider)
-- `GET /v1/tasks/{id}` - Check async task status
-- `GET /models/ui` - Web interface for model browsing
+**Task Status:**
+```
+GET /v1/tasks/{task_id}
+  → Returns: { status, progress, result?, error? }
+```
 
-## Database Schema Migration
+**Model Listing:**
+```
+GET /v1/models?provider=google
+  → Returns: Array of available models with pricing/capabilities
+```
 
-Convert Prisma schema to Drizzle for:
-- Users (credits tracking)
-- APIKeys (authentication)
-- APIUsage (logging/analytics)
+**Web Interfaces:**
+```
+GET /models - HTML page with model browser
+GET /tasks - HTML page with task status viewer
+```
 
-Use Turso (libSQL) as the database backend for Cloudflare Workers compatibility.
+## Cloudflare Workers Environment
 
-## Environment Variables
+### Environment Bindings ([src/types/env.ts](src/types/env.ts))
 
-### Core Infrastructure
-- `ASYNC_QUEUE` - Cloudflare Queue for async processing (CRITICAL)
-- `DB` - D1 Database binding for Drizzle
-- `STORAGE_BUCKET` - R2 bucket for generated assets
+**R2 Buckets:**
+- `STORAGE_BUCKET` - Main storage for generated assets
+
+**Queues:**
+- `ASYNC_QUEUE` - Queue for async generation tasks
+
+**Environment Variables:**
+- `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` - Database connection
+- `R2_BUCKET_NAME`, `R2_CUSTOM_PUBLIC_URL` - Storage configuration
 - `JWT_SECRET` - Authentication token signing
-- `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` - Production database
+- Provider API keys: `GEMINI_API_KEY`, `REPLICATE_API_KEY`, `RUNWARE_API_KEY`, etc.
+- `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_SERVICE_ACCOUNT_KEY`
+
+### Workers Constraints
+
+**What You CAN'T Use:**
+- Node.js filesystem APIs (`fs`, `path`)
+- `child_process`, `cluster`
+- Long-running synchronous operations (CPU time limits)
+- Prisma ORM (use Drizzle instead)
+
+**What You SHOULD Use:**
+- `fetch()` for HTTP requests
+- Cloudflare R2 for file storage
+- Cloudflare Queues for async tasks
+- Drizzle ORM for database
+- Native `crypto` API
+- `c.env` for environment variables in Hono context
+
+### Configuration Files
+
+- [wrangler.jsonc](wrangler.jsonc) - Cloudflare Workers config (bindings, queues, R2)
+- [drizzle.config.ts](drizzle.config.ts) - Drizzle ORM config
+- [tsconfig.json](tsconfig.json) - TypeScript configuration
+
+## Migration Status
+
+**Current Phase: Phase 2 Complete ✅ | Phase 3 Next (Runware)**
+
+### Phase 1: Foundation ✅ COMPLETED
+- Drizzle ORM + Turso database
+- R2 storage with CUID and date-based folders
+- API key middleware and rate limiting
+- Core services migrated
+
+### Phase 2: Google Models ✅ COMPLETED
+- 14 Google image models (Gemini, Imagen 3/4)
+- 4 Google video models (Veo 2/3)
+- Google Vertex AI and Gemini API integration
+- Image/video generation endpoints
+- Async task processing with queues
+
+### Phase 3: Runware Models (Next)
+- Runware image models verification
+- Provider fallback logic (Google → Runware)
+- Integration testing
+
+### Phase 4: Production Readiness
+- Monitoring and observability
+- Performance optimization
+- Production deployment
+
+See [TODO.md](TODO.md) for detailed migration progress.
+
+## Key Implementation Patterns
+
+### Adding a New Model
+
+1. Create model file in `src/shared/imageModels/{provider}/` or `videoModels/{provider}/`
+2. Export model from provider's `index.ts`
+3. Add provider handler in `imageService.ts` or `videoService.ts` if new
+4. Update provider selector to recognize new provider
+5. Test with both sync and async modes
+
+### Adding a New Provider
+
+1. Add API key to environment variables
+2. Create provider handler function in service layer
+3. Implement provider-specific API call logic
+4. Add provider config to model definitions
+5. Update provider selector to check for API key
+6. Handle async polling if provider requires it
+
+### Async Task Processing
+
+1. Request comes to `/v1/openai/images/generations`
+2. Route handler validates and creates task ID
+3. Task record inserted into `api_usage` table with `taskStatus: 'pending'`
+4. Queue message sent to `ASYNC_QUEUE`
+5. HTTP response returns immediately with `task_id`
+6. Queue consumer picks up message in background
+7. Consumer updates `taskStatus: 'processing'`
+8. Provider API called and polled if needed
+9. Results stored in R2, URLs saved to `outputUrls`
+10. Task completed with `taskStatus: 'completed'`
+11. Client polls `GET /v1/tasks/{id}` to retrieve results
+
+## Common Development Workflows
+
+### Testing a Model Locally
+```bash
+npm run dev
+
+# Test sync mode (immediate response)
+curl -X POST http://localhost:8787/v1/openai/images/generations \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{"model": "google/imagen-4", "prompt": "a cat", "async": false}'
+
+# Test async mode (queue processing)
+curl -X POST http://localhost:8787/v1/openai/images/generations \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{"model": "google/imagen-4", "prompt": "a cat"}'
+```
+
+### Debugging Queue Processing
+```bash
+# Check Cloudflare dashboard for queue metrics
+# View logs: wrangler tail --format pretty
+npm run dev
+# Trigger a generation and watch logs
+```
+
+### Database Inspection
+```bash
+npm run db:studio
+# Opens Drizzle Studio at http://localhost:4983
+# Browse tables, run queries, inspect data
+```
+
+### Deploying to Production
+```bash
+npm run deploy
+# Deploys to Cloudflare Workers
+# Automatically applies database migrations
+# Updates environment variables from wrangler.jsonc
+```
+
+## Error Handling
+
+**Authentication Errors:**
+- Missing API key → 401 Unauthorized
+- Invalid API key → 401 Unauthorized
+- Insufficient credits → 402 Payment Required
+
+**Generation Errors:**
+- Model not found → 404 Not Found
+- Invalid parameters → 400 Bad Request
+- Provider API failure → 500 Internal Server Error (retry via queue)
+- Timeout → Task marked as failed with error message
+
+**Async Task Errors:**
+- Failed tasks are retried up to 3 times (configured in wrangler.jsonc)
+- Dead letter queue: `imagerouter-failed-tasks` for manual inspection
+- Error messages stored in `api_usage.error` field
+
+## Important Implementation Notes
+
+### Database Records for Generated Assets
+
+**CRITICAL**: Every generated image or video MUST be recorded in the database with:
+1. **Task ID** - Unique identifier for async tracking
+2. **Output URLs** - JSON array of R2 URLs in `api_usage.outputUrls`
+3. **Cost and timing** - For billing and analytics
+4. **Provider and model** - For usage tracking
+5. **Task status** - For async completion polling
+
+**Never return base64 data directly** - always upload to R2 first and return URLs.
+
+### File Naming Convention
+
+**Use CUID for all filenames:**
+```typescript
+import { cuid } from 'cuid'
+const filename = `${cuid()}.${extension}`
+```
+
+**Never use user IDs in filenames** - prevents collisions and security issues.
+
+### Pricing Calculation
+
+**Three pricing types** ([src/shared/PricingScheme.ts](src/shared/PricingScheme.ts)):
+- `FIXED` - Flat rate per generation
+- `CALCULATED` - Based on parameters (size, quality, steps)
+- `POST_GENERATION` - Determined after completion (e.g., per-second video)
+
+Cost is stored as `cost * 10000` (integer) in database for precision.
 
 ### Provider API Keys
-- `GOOGLE_CLOUD_PROJECT_ID` + `GOOGLE_CLOUD_LOCATION` + `GOOGLE_SERVICE_ACCOUNT_KEY`
-- `GEMINI_API_KEY` - Google Gemini API access
-- `REPLICATE_API_KEY` - Replicate model access (NEW)
-- `FAL_API_KEY` - FAL AI models
-- `RUNWARE_API_KEY` - Runware provider
-- `WAVESPEED_API_KEY` - WaveSpeed video models
 
-### Storage Configuration  
-- `R2_BUCKET_NAME` + `R2_CUSTOM_PUBLIC_URL` - Cloudflare R2 storage
-- Replaces S3 configuration from Express version
+**Check availability before selection:**
+```typescript
+if (!c.env.REPLICATE_API_KEY) {
+  throw new Error('Replicate API key not configured')
+}
+```
 
-## Testing
+**Provider ID mapping:**
+- `gemini` → `GEMINI_API_KEY`
+- `geminiImagen` → `GEMINI_API_KEY`
+- `vertex` → `GOOGLE_SERVICE_ACCOUNT_KEY`
+- `runware` → `RUNWARE_API_KEY`
 
-Maintain test compatibility:
-- API endpoint tests
-- Model validation tests
-- Provider selection tests
-- Focus on Google and Bytedance model coverage
+**Note**: Only Google and Runware providers are supported in this implementation.
 
-## Task Management and TODO Tracking
+### Google Authentication
 
-**IMPORTANT**: This project uses a structured TODO.md file to track migration progress across phases.
+**Two auth methods** ([src/services/googleAuth.ts](src/services/googleAuth.ts)):
+1. **Gemini API** - Direct API key (`GEMINI_API_KEY`)
+2. **Vertex AI** - Service account with OAuth2 access token
 
-### TODO Management Rules:
-1. **Always use TodoWrite tool** to track your progress on tasks
-2. **Mark tasks as completed** immediately after finishing them
-3. **Update TODO.md file** whenever a significant milestone is reached
-4. **Cross-reference with TODO.md** to understand current phase and remaining work
+Use `getGoogleAccessToken(serviceAccountKey)` for Vertex AI models.
 
-### When completing tasks:
-- Mark the task as ✅ completed in TODO.md
-- Add completion date if significant
-- Update phase progress summaries
-- Note any blockers or dependencies discovered
+## Testing Scripts
 
-### TODO.md Structure:
-- **Phase 1**: Foundation & Infrastructure (✅ COMPLETED)
-- **Phase 2**: Google Models Migration (IN PROGRESS)
-- **Phase 3**: Bytedance Models Migration 
-- **Phase 4**: Advanced Features & Optimization
-- **Phase 5**: Future Extensions (Other Models)
+- [test_video.sh](test_video.sh) - Test Google Veo video generation
+- [test_replicate.sh](test_replicate.sh) - Test Replicate integration
+- [test_runware.sh](test_runware.sh) - Test Runware models
+- [test_multi_provider.sh](test_multi_provider.sh) - Test provider fallback logic
+- [test_video_test_mode.sh](test_video_test_mode.sh) - Test video mock mode
 
-### Progress Tracking:
-Always check TODO.md to understand:
-- Which phase you're currently in
-- What specific tasks remain
-- Dependencies between tasks
-- Success criteria for each phase
+## Production Architecture
 
-The TODO.md file is the single source of truth for migration progress.
+**Cloudflare Workers Stack:**
+- **Runtime**: Edge workers (V8 isolates)
+- **Framework**: Hono.js (Express-like API)
+- **Database**: Turso (libSQL) via Drizzle ORM
+- **Storage**: Cloudflare R2 (S3-compatible)
+- **Queues**: Cloudflare Queues for async processing
+- **Monitoring**: Cloudflare observability (configured in wrangler.jsonc)
+
+**Scaling Properties:**
+- No cold starts (V8 isolates)
+- Global edge distribution
+- Unlimited concurrent requests
+- Queue-based async processing prevents timeouts
+- R2 storage with CDN distribution
+
+## Documentation
+
+- **API Docs**: OpenAPI spec in [src/openapiDoc.ts](src/openapiDoc.ts)
+- **Migration Plan**: [TODO.md](TODO.md) - Detailed phase-by-phase migration status
+- **Replicate Polling**: [REPLICATE_POLLING.md](REPLICATE_POLLING.md) - Async polling implementation
+- **Setup Guide**: [README.md](README.md) - Project setup and configuration

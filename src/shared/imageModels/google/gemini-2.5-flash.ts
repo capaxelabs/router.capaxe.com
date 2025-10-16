@@ -1,6 +1,6 @@
 import { PRICING_TYPES } from '../../PricingScheme'
 import { processSingleOrMultipleFiles } from '../../../lib/imageHelpers'
-import { ModelData } from './imagen-3'
+import { ModelData } from '../../../utils/providerSelector'
 
 export default class Gemini25Flash {
   data: ModelData

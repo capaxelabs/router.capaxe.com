@@ -4,16 +4,16 @@ import { Database, users, apiUsage } from '../db'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleImageModels } from '../shared/imageModels/google'
 import { googleVideoModels } from '../shared/videoModels/google'
-import { bytedanceImageModels } from '../shared/imageModels/bytedance'
-import { bytedanceVideoModels } from '../shared/videoModels/bytedance'
+import { runwareImageModels } from '../shared/imageModels/runware'
+import { runwareVideoModels } from '../shared/videoModels/runware'
 import { preCalcPrice, postCalcPrice, convertPriceToDbFormat } from '../shared/priceCalculator'
 import { AuthenticatedUser } from '../middleware/apiKeyMiddleware'
 
 const models: Record<string, any> = {
   ...googleImageModels,
   ...googleVideoModels,
-  ...bytedanceImageModels,
-  ...bytedanceVideoModels
+  ...runwareImageModels,
+  ...runwareVideoModels
 }
 
 export interface UsageLogEntry {

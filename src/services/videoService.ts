@@ -1,12 +1,12 @@
 import { Context } from 'hono'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { googleVideoModels } from '../shared/videoModels/google'
-import { bytedanceVideoModels } from '../shared/videoModels/bytedance'
+import { runwareVideoModels } from '../shared/videoModels/runware'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
 import { R2StorageService } from '../lib/storage'
 import { VideoGenerationRequest, VideoGenerationResponse } from '../lib/validation'
-import { pollReplicatePrediction } from './replicateUtils'
+
 
 export interface VideoGenerationParams extends VideoGenerationRequest {
   files?: {
@@ -28,6 +28,7 @@ export interface VideoGenerationResult {
   }>
   latency?: number
   cost?: number
+  provider?: string
 }
 
 /**
@@ -40,8 +41,8 @@ export async function generateVideo(
 ): Promise<VideoGenerationResult> {
   const startTime = Date.now()
   
-  // Get model configuration from both Google and Bytedance models
-  const allVideoModels = { ...googleVideoModels, ...bytedanceVideoModels }
+  // Get model configuration from Google and Runware models
+  const allVideoModels = { ...googleVideoModels, ...runwareVideoModels }
   const modelConfig = allVideoModels[params.model]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
@@ -98,22 +99,16 @@ export async function generateVideo(
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
-    case 'replicate':
-      // Replicate defaults to async mode for production scalability
-      if (c.req.query('async') === 'false') {
-        // Only allow sync mode when explicitly requested (for testing/development)
-        console.warn('Sync mode used for Replicate - not recommended for production')
-        result = await generateReplicateVideo(c, { ...processedParams, model: actualModel }, userId)
-      } else {
-        // Default to async mode - handled by queue consumer
-        throw new Error('Async video generation should be handled by queue consumer')
-      }
+    case 'runware':
+      // Runware video generation
+      result = await generateRunwareVideo(c, { ...processedParams, model: actualModel }, userId)
       break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
   }
 
   result.latency = Date.now() - startTime
+  result.provider = selectedProvider.id
 
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
@@ -183,16 +178,9 @@ export async function generateVideoAsync(
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
-    case 'replicate':
-      // Replicate defaults to async mode for production scalability
-      if (c.req.query('async') === 'false') {
-        // Only allow sync mode when explicitly requested (for testing/development)
-        console.warn('Sync mode used for Replicate - not recommended for production')
-        result = await generateReplicateVideo(c, { ...processedParams, model: actualModel }, userId)
-      } else {
-        // Default to async mode - handled by queue consumer
-        throw new Error('Async video generation should be handled by queue consumer')
-      }
+    case 'runware':
+      // Runware video generation
+      result = await generateRunwareVideo(c, { ...processedParams, model: actualModel }, userId)
       break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
@@ -754,74 +742,51 @@ async function updatePollingStatus(db: any, taskId: string, pollAttempts: number
 }
 
 /**
- * Generate videos using Replicate API
+ * Generate video using Runware SDK
  */
-async function generateReplicateVideo(
+async function generateRunwareVideo(
   c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: VideoGenerationParams & { model: string },
   userId: string
 ): Promise<VideoGenerationResult> {
-  const providerUrl = `https://api.replicate.com/v1/models/${params.model}/predictions`
-  const providerKey = c.env.REPLICATE_API_KEY
+  const providerKey = c.env.RUNWARE_API_KEY
 
   if (!providerKey) {
-    throw new Error('REPLICATE_API_KEY environment variable is required')
+    throw new Error('RUNWARE_API_KEY environment variable is required')
   }
 
-  // Build the input object starting with the prompt
-  const bodyPayload: Record<string, any> = {
-    input: {
-      prompt: params.prompt
+  try {
+    // Import Runware service
+    const { getRunwareService } = await import('./runwareService')
+
+    // Get or create Runware service instance (singleton pattern)
+    const runwareService = getRunwareService(providerKey, {
+      shouldReconnect: true,
+      globalMaxRetries: 3,
+      timeoutDuration: 180000 // 3 minutes for video generation
+    })
+
+    // Build Runware video request parameters
+    const runwareParams: any = {
+      model: params.model,
+      prompt: params.prompt,
+      duration: params.duration || 5, // Default 5 seconds
+      width: params.width || 1280,
+      height: params.height || 720,
+      includeCost: true,
+      response_format: params.response_format || 'url'
     }
-  }
 
-  // Add additional parameters from the request
-  if (params.width) bodyPayload.input.width = params.width
-  if (params.height) bodyPayload.input.height = params.height
-  if (params.duration) bodyPayload.input.duration = params.duration
+    // Add optional parameters
+    if (params.negativePrompt) runwareParams.negativePrompt = params.negativePrompt
+    if (params.seed) runwareParams.seed = params.seed
 
-  // Add any additional parameters that might be specific to the model
-  Object.keys(params).forEach(key => {
-    if (!['prompt', 'model', 'width', 'height', 'duration', 'files', 'imagesData'].includes(key)) {
-      bodyPayload.input[key] = params[key as keyof typeof params]
-    }
-  })
+    // Generate video using Runware SDK
+    const result = await runwareService.generateVideo(runwareParams)
 
-  const response = await fetch(providerUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${providerKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(bodyPayload)
-  })
-
-  if (!response.ok) {
-    const errorData = await response.json()
-    throw new Error(`Replicate API error: ${errorData.detail || response.statusText}`)
-  }
-
-  let data = await response.json()
-
-  // If the prediction is still running, poll until it finishes
-  if (data.status !== 'succeeded' || !data.output) {
-    data = await pollReplicatePrediction(data.urls.get, providerKey)
-  }
-
-  // Handle timeout without throwing so credits are not fully refunded
-  if (data.status === 'timeout' || !data.output) {
-    throw new Error('Prediction timed out on Replicate – please try again later')
-  }
-
-  // Process the output - Replicate typically returns URL or array of URLs
-  const output = Array.isArray(data.output) ? data.output : [data.output]
-  
-  return {
-    created: Math.floor(Date.now() / 1000),
-    data: output.map((url: string) => ({
-      url: url,
-      revised_prompt: null
-    })),
-    cost: data.cost || 0
+    return result
+  } catch (error) {
+    console.error('Runware video generation error:', error)
+    throw new Error(`Runware video generation failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 }

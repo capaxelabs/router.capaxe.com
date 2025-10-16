@@ -1,20 +1,19 @@
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import { CloudflareBindings, ContextVariables } from '../types/env'
-import { createVideoGenerationHandler } from '../services/generationWrapper'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
-import { VideoGenerationRequest, VideoGenerationResponse, validateVideoRequest } from '../lib/validation'
+import { VideoGenerationRequest, validateVideoRequest } from '../lib/validation'
 import { createQueueService } from '../services/queueService'
+import { googleVideoModels } from '../shared/videoModels/google'
+import { runwareVideoModels } from '../shared/videoModels/runware'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
-// Create the generation handler with usage logging
-const videoGenerationHandler = createVideoGenerationHandler()
-
 /**
- * POST /v1/openai/videos/generations
- * Generate videos using Google models with usage logging
+ * POST /v1/videos/generations
+ * Generate videos using async queue (Google & Runware models)
+ * Always returns immediately with task ID for status polling
  */
 app.post('/generations',
   ipLimiter,
@@ -40,10 +39,6 @@ app.post('/generations',
     try {
       const validatedData = c.req.valid('json') as VideoGenerationRequest
       const authenticatedUser = c.get('authenticatedUser')
-      
-      // Check if sync mode is requested (async is now default)
-      const isSync = c.req.query('sync') === 'true'
-      const isAsync = !isSync
       
       // Create request with potential file data or base64 data
       const requestData: any = { ...validatedData }
@@ -128,9 +123,21 @@ app.post('/generations',
         })
       }
 
-      if (isAsync) {
-        // ASYNC MODE: Create task and return immediately
-        try {
+      // ASYNC MODE ONLY: Validate model exists before creating task
+      const allVideoModels = { ...googleVideoModels, ...runwareVideoModels }
+      
+      if (!allVideoModels[validatedData.model]) {
+        return c.json({
+          error: {
+            message: `Model '${validatedData.model}' not found. Use GET /v1/models to see available models.`,
+            type: 'invalid_model',
+            param: 'model'
+          }
+        }, 400)
+      }
+      
+      // Create task and return immediately
+      try {
           const queueService = createQueueService(c)
           const { taskId } = await queueService.createAsyncTask('video', authenticatedUser!.id, {
             model: validatedData.model,
@@ -151,32 +158,15 @@ app.post('/generations',
             estimatedCompletionTime: Date.now() + 60000 // 60 seconds estimate
           })
 
-        } catch (queueError) {
-          console.error('Failed to create async video task:', queueError)
-          return c.json({
-            error: {
-              message: 'Failed to create async video task. Please add ?sync=true for synchronous generation or try again.',
-              type: 'async_creation_error'
-            }
-          }, 500)
-        }
-        
-      } else {
-        // SYNC MODE: Process immediately (existing behavior)
-        const result = await videoGenerationHandler(c, requestData)
-
-        // Return in OpenAI-compatible format
-        const response: VideoGenerationResponse = {
-          created: result.created,
-          data: result.data.map(item => ({
-            url: item.url,
-            b64_json: item.b64_json,
-            revised_prompt: item.revised_prompt || undefined
-          })),
-          cost: result.cost
-        }
-
-        return c.json(response)
+      } catch (queueError) {
+        console.error('Failed to create async video task:', queueError)
+        return c.json({
+          error: {
+            message: 'Async processing not available. Please deploy to Cloudflare Workers to enable queue-based async processing.',
+            type: 'async_unavailable',
+            details: (queueError as Error).message
+          }
+        }, 503)
       }
 
     } catch (error: unknown) {

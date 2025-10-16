@@ -1,7 +1,6 @@
 // Google Image Models
 import Gemini20FlashExp from './gemini-2.0-flash-exp'
 import Gemini20FlashPrev from './gemini-2.0-flash-prev'
-import Gemini25FlashFree from './gemini-2.5-flash-free'
 import Gemini25Flash from './gemini-2.5-flash'
 import Imagen3Fast from './imagen-3-fast'
 import Imagen3 from './imagen-3'
@@ -18,7 +17,6 @@ import Imagen4 from './imagen-4'
 export const googleImageModels = {
   'google/gemini-2.0-flash-exp': new Gemini20FlashExp().getData(),
   'google/gemini-2.0-flash-prev': new Gemini20FlashPrev().getData(),
-  'google/gemini-2.5-flash:free': new Gemini25FlashFree().getData(),
   'google/gemini-2.5-flash': new Gemini25Flash().getData(),
   'google/imagen-3-fast': new Imagen3Fast().getData(),
   'google/imagen-3': new Imagen3().getData(),
@@ -36,7 +34,6 @@ export const googleImageModels = {
 export {
   Gemini20FlashExp,
   Gemini20FlashPrev,
-  Gemini25FlashFree,
   Gemini25Flash,
   Imagen3Fast,
   Imagen3,

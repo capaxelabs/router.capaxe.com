@@ -7,14 +7,14 @@ import { generateVideo, VideoGenerationParams } from './videoService'
 import { selectProvider } from '../utils/providerSelector'
 import { googleImageModels } from '../shared/imageModels/google'
 import { googleVideoModels } from '../shared/videoModels/google'
-import { bytedanceImageModels } from '../shared/imageModels/bytedance'
-import { bytedanceVideoModels } from '../shared/videoModels/bytedance'
+import { runwareImageModels } from '../shared/imageModels/runware'
+import { runwareVideoModels } from '../shared/videoModels/runware'
 
 const models = {
   ...googleImageModels,
   ...googleVideoModels,
-  ...bytedanceImageModels,
-  ...bytedanceVideoModels
+  ...runwareImageModels,
+  ...runwareVideoModels
 }
 
 interface GenerationResult {

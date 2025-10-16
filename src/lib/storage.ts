@@ -15,6 +15,12 @@ export class R2StorageService {
     this.bucket = bucket
     this.bucketName = bucketName
     this.publicUrl = publicUrl
+    
+    console.log('[R2StorageService] Initialized with:')
+    console.log(`  - Bucket: ${bucket ? 'provided' : 'NULL/UNDEFINED'}`)
+    console.log(`  - BucketName: ${bucketName || 'EMPTY'}`)
+    console.log(`  - PublicURL: ${publicUrl || 'EMPTY'}`)
+    console.log(`  - isEnabled: ${this.isEnabled()}`)
   }
 
   isEnabled(): boolean {
@@ -50,93 +56,132 @@ export class R2StorageService {
 
   // Internal helper that handles the actual R2 put request
   private async _uploadBody(body: ArrayBuffer | ReadableStream | string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
+    console.log(`[R2 Upload] Starting upload - type: ${type}, contentType: ${contentType}`)
+    
     if (!this.bucket) {
+      console.error('[R2 Upload] ERROR: R2 bucket not available')
       throw new Error('R2 bucket not available')
     }
 
     const fileName = this.generateFileName(contentType, type)
+    console.log(`[R2 Upload] Generated filename: ${fileName}`)
 
-    const object = await this.bucket.put(fileName, body, {
-      httpMetadata: {
-        contentType: contentType
+    try {
+      const object = await this.bucket.put(fileName, body, {
+        httpMetadata: {
+          contentType: contentType
+        }
+      })
+
+      if (!object) {
+        console.error(`[R2 Upload] ERROR: bucket.put() returned null/undefined for ${fileName}`)
+        throw new Error('Failed to upload file to R2')
       }
-    })
 
-    if (!object) {
-      throw new Error('Failed to upload file to R2')
-    }
+      console.log(`[R2 Upload] Successfully uploaded to R2: ${fileName}, key: ${object.key}, size: ${object.size} bytes`)
 
-    // Preserve buffer if it's available for b64_json fallback
-    const maybeBuffer = body instanceof ArrayBuffer ? Buffer.from(body) : null
+      // Preserve buffer if it's available for b64_json fallback
+      const maybeBuffer = body instanceof ArrayBuffer ? Buffer.from(body) : null
 
-    const publicUrl = this.publicUrl ? `${this.publicUrl}/${fileName}` : fileName
+      const publicUrl = this.publicUrl ? `${this.publicUrl}/${fileName}` : fileName
+      console.log(`[R2 Upload] Generated public URL: ${publicUrl}`)
 
-    return {
-      success: true,
-      url: publicUrl,
-      buffer: maybeBuffer
+      return {
+        success: true,
+        url: publicUrl,
+        buffer: maybeBuffer
+      }
+    } catch (error) {
+      console.error(`[R2 Upload] ERROR during bucket.put():`, error)
+      throw error
     }
   }
 
   async downloadAndUpload(url: string, contentType: string, type: 'image' | 'video' = 'image', needBuffer = false): Promise<R2UploadResult> {
+    console.log(`[R2 Download] Starting download from: ${url}`)
+    console.log(`[R2 Download] Storage enabled: ${this.isEnabled()}, bucket: ${this.bucket ? 'available' : 'null'}, bucketName: ${this.bucketName}, publicUrl: ${this.publicUrl}`)
+    
     if (!this.isEnabled()) {
+      console.error('[R2 Download] ERROR: Storage service is not configured')
       throw new Error('Storage service is not configured')
     }
 
     try {
+      console.log(`[R2 Download] Fetching content from ${url}...`)
       const response = await fetch(url)
       if (!response.ok) {
+        console.error(`[R2 Download] ERROR: Failed to download - status: ${response.status} ${response.statusText}`)
         throw new Error(`Failed to download content: ${response.statusText}`)
       }
+
+      const contentLength = response.headers.get('content-length')
+      console.log(`[R2 Download] Download successful - Content-Length: ${contentLength || 'unknown'} bytes`)
 
       // For R2, we can use the response body directly or convert to ArrayBuffer
       let body: ArrayBuffer | ReadableStream
       if (needBuffer || !response.body) {
+        console.log('[R2 Download] Converting to ArrayBuffer...')
         body = await response.arrayBuffer()
+        console.log(`[R2 Download] ArrayBuffer size: ${(body as ArrayBuffer).byteLength} bytes`)
       } else {
+        console.log('[R2 Download] Using ReadableStream directly')
         body = response.body
       }
 
       return await this._uploadBody(body, contentType, type)
     } catch (error) {
-      console.error('Storage upload error:', error)
+      console.error('[R2 Download] ERROR:', error)
       throw new Error(`Failed to upload to storage: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
   async uploadBase64(base64Data: string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
+    console.log(`[R2 Base64] Starting base64 upload - type: ${type}, contentType: ${contentType}`)
+    console.log(`[R2 Base64] Storage enabled: ${this.isEnabled()}, bucket: ${this.bucket ? 'available' : 'null'}`)
+    
     if (!this.isEnabled()) {
+      console.error('[R2 Base64] ERROR: Storage service is not configured')
       throw new Error('Storage service is not configured')
     }
 
     try {
       const base64Content = base64Data.replace(/^data:[^;]+;base64,/, '')
+      console.log(`[R2 Base64] Base64 content length: ${base64Content.length} chars`)
+      
       if (!base64Content) {
+        console.error('[R2 Base64] ERROR: Invalid base64 data - empty content')
         throw new Error('Invalid base64 data: empty content')
       }
       
       // Convert base64 to ArrayBuffer for R2
+      console.log('[R2 Base64] Converting base64 to ArrayBuffer...')
       const binaryString = atob(base64Content)
       const buffer = new ArrayBuffer(binaryString.length)
       const view = new Uint8Array(buffer)
       for (let i = 0; i < binaryString.length; i++) {
         view[i] = binaryString.charCodeAt(i)
       }
+      console.log(`[R2 Base64] ArrayBuffer created: ${buffer.byteLength} bytes`)
       
       return await this._uploadBody(buffer, contentType, type)
     } catch (error) {
-      console.error('Storage upload error:', error)
+      console.error('[R2 Base64] ERROR:', error)
       throw new Error(`Failed to upload base64 to storage: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
   async processContent(content: any, responseFormat = 'url', type: 'image' | 'video' = 'image'): Promise<any> {
+    console.log(`[R2 Process] Processing content - type: ${type}, responseFormat: ${responseFormat}`)
+    console.log(`[R2 Process] Content has URL: ${!!content.url}, has b64_json: ${!!content.b64_json}`)
+    
     if (!this.isEnabled()) {
+      console.warn('[R2 Process] Storage not enabled, returning content as-is')
       return content
     }
 
     try {
       if (!content.url && !content.b64_json) {
+        console.log('[R2 Process] No URL or base64 data, skipping')
         return content
       }
 
@@ -144,16 +189,21 @@ export class R2StorageService {
 
       if (content.url) {
         const contentType = this.detectContentType(content.url)
+        console.log(`[R2 Process] Detected content type from URL: ${contentType}`)
         const needBuffer = responseFormat === 'b64_json'
         uploadResult = await this.downloadAndUpload(content.url, contentType, type, needBuffer)
       } else if (content.b64_json) {  
         const contentType = this.detectContentTypeFromBase64(content.b64_json)
+        console.log(`[R2 Process] Detected content type from base64: ${contentType}`)
         uploadResult = await this.uploadBase64(content.b64_json, contentType, type)
       }
 
       if (!uploadResult) {
+        console.warn('[R2 Process] No upload result, returning original content')
         return content
       }
+
+      console.log(`[R2 Process] Upload successful! URL: ${uploadResult.url}`)
 
       if (responseFormat === 'b64_json') {
         // Use the buffer from upload result instead of re-downloading
@@ -165,6 +215,7 @@ export class R2StorageService {
           _uploadedUrl: uploadResult.url
         }
         delete result.url
+        console.log(`[R2 Process] Returning b64_json response with _uploadedUrl: ${uploadResult.url}`)
         return result
       } else {
         const result = {
@@ -172,10 +223,11 @@ export class R2StorageService {
           url: uploadResult.url
         }
         delete result.b64_json
+        console.log(`[R2 Process] Returning URL response: ${uploadResult.url}`)
         return result
       }
     } catch (error) {
-      console.error('Content processing error:', error)
+      console.error('[R2 Process] ERROR during content processing:', error)
       // Return original content as fallback
       return content
     }
@@ -295,8 +347,14 @@ export function createStorageService(
   bucketName?: string,
   publicUrl?: string
 ): R2StorageService | null {
+  console.log('[createStorageService] Creating storage service with:')
+  console.log(`  - bucket: ${bucket ? 'provided' : 'NULL/UNDEFINED'}`)
+  console.log(`  - bucketName: ${bucketName || 'EMPTY'}`)
+  console.log(`  - publicUrl: ${publicUrl || 'EMPTY'}`)
+  
   if (!bucket || !bucketName || !publicUrl) {
-    console.warn('R2 bucket, bucket name, or public URL not provided. Storage service will be disabled.')
+    console.warn('[createStorageService] WARNING: R2 bucket, bucket name, or public URL not provided. Storage service will be disabled.')
+    console.warn(`  Missing: ${!bucket ? 'bucket ' : ''}${!bucketName ? 'bucketName ' : ''}${!publicUrl ? 'publicUrl' : ''}`)
     return null
   }
 
