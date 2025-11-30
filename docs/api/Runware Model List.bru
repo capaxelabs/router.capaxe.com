@@ -1,0 +1,83 @@
+meta {
+  name: Runware Model List
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{APP_URL}}/v1/runware/models?offset=0&limit=20
+  body: none
+  auth: none
+}
+
+params:query {
+  offset: 0
+  limit: 20
+}
+
+tests {
+  test("Status should be 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should return data array with models", function() {
+    expect(res.getBody().data).to.be.an('array');
+    const searchData = res.getBody().data[0];
+    expect(searchData).to.have.property('results');
+    expect(searchData.results).to.be.an('array');
+  });
+  
+  test("Should have pagination info", function() {
+    const searchData = res.getBody().data[0];
+    expect(searchData).to.have.property('totalResults');
+    expect(searchData.totalResults).to.be.a('number');
+  });
+  
+  test("Should respect limit parameter", function() {
+    const searchData = res.getBody().data[0];
+    const results = searchData.results;
+    expect(results.length).to.be.at.most(20);
+  });
+}
+
+docs {
+  List all available Runware models with pagination.
+  
+  This is a convenience endpoint that returns all models without any filters.
+  Perfect for:
+  - Browsing the complete model catalog
+  - Building a model picker UI
+  - Discovering new models
+  
+  ## Query Parameters:
+  - offset: Starting position for pagination (default: 0)
+  - limit: Number of results per page (default: 20, max: 100)
+  
+  ## Response:
+  Same format as the search endpoint:
+  {
+    "data": [{
+      "taskUUID": "uuid-v4",
+      "taskType": "modelSearch",
+      "totalResults": 500,
+      "results": [
+        {
+          "name": "Model Name",
+          "air": "civitai:123456@789012",
+          "category": "checkpoint",
+          "architecture": "sdxl",
+          ...
+        }
+      ]
+    }]
+  }
+  
+  ## Pagination Example:
+  
+  Page 1: GET /v1/runware/models?offset=0&limit=20
+  Page 2: GET /v1/runware/models?offset=20&limit=20
+  Page 3: GET /v1/runware/models?offset=40&limit=20
+  
+  Use totalResults to calculate total pages:
+  totalPages = Math.ceil(totalResults / limit)
+}

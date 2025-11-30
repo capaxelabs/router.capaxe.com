@@ -1,14 +1,24 @@
-import { googleImageModels } from './imageModels/google'
-import { googleVideoModels } from './videoModels/google'
-import { runwareImageModels } from './imageModels/runware'
-import { runwareVideoModels } from './videoModels/runware'
 import { PRICING_TYPES } from './PricingScheme'
+import type { ModelData } from '../utils/providerSelector'
 
-const models = {
-  ...googleImageModels,
-  ...googleVideoModels,
-  ...runwareImageModels,
-  ...runwareVideoModels
+// Model cache for price calculator (to avoid async db calls in sync contexts)
+let modelsCache: Record<string, ModelData> = {}
+
+/**
+ * Set models cache (called from services before price calculation)
+ */
+export function setModelsCache(models: Record<string, ModelData>): void {
+  modelsCache = models
+}
+
+/**
+ * Get models from cache
+ */
+function getModels(): Record<string, ModelData> {
+  if (Object.keys(modelsCache).length === 0) {
+    throw new Error('Models cache not initialized. Call setModelsCache() first.')
+  }
+  return modelsCache
 }
 
 /**
@@ -23,7 +33,8 @@ export function convertPriceToDbFormat(usdPrice: number): number {
  * If the price cannot be calculated before generation, return the max price.
  */
 export function preCalcPrice(modelName: string, size?: string, quality?: string, providerIndex?: number): number {
-  const modelConfig = (models as any)[modelName]
+  const models = getModels()
+  const modelConfig = models[modelName]
   if (!modelConfig) {
     throw new Error(`Model '${modelName}' not found in price calculator`)
   }
@@ -59,7 +70,8 @@ export function postCalcPrice(
   generationResult?: any, 
   providerIndex?: number
 ): number {
-  const modelConfig = (models as any)[modelName]
+  const models = getModels()
+  const modelConfig = models[modelName]
   if (!modelConfig) {
     throw new Error(`Model '${modelName}' not found in price calculator`)
   }

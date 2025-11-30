@@ -36,8 +36,8 @@ export async function queueAsyncTask(
   if (c.env.ASYNC_QUEUE) {
     await c.env.ASYNC_QUEUE.send(message)
   } else {
-    console.warn('ASYNC_QUEUE not configured, task will not be processed')
-    throw new Error('Async processing not available')
+    console.error('ASYNC_QUEUE not configured - queue service is required for all operations')
+    throw new Error('Queue service unavailable: ASYNC_QUEUE binding not configured')
   }
 }
 

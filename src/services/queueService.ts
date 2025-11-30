@@ -50,11 +50,44 @@ export class QueueService {
       quality?: string
       apiKeyId?: string
       ip?: string
+      imagesData?: Array<{ data: string; type: string; filename?: string }>
       [key: string]: any
-    }
+    },
+    storageService?: any // R2StorageService instance
   ): Promise<{ taskId: string; usageId: string }> {
     const taskId = generateTaskId(type, userId)
     const usageId = `usage_${taskId}`
+
+    // Upload input images to R2 if provided (to avoid queue size limit)
+    let inputImageUrls: string[] = []
+    if (request.imagesData && request.imagesData.length > 0 && storageService) {
+      console.log(`[QueueService] Uploading ${request.imagesData.length} source images to R2...`)
+      for (const imageData of request.imagesData) {
+        try {
+          const url = await storageService.uploadSourceImage(
+            imageData.data,
+            imageData.type || 'image/png'
+          )
+          inputImageUrls.push(url)
+        } catch (error) {
+          console.error('[QueueService] Failed to upload source image:', error)
+          throw new Error(`Failed to upload source image: ${error instanceof Error ? error.message : 'Unknown error'}`)
+        }
+      }
+      console.log(`[QueueService] Uploaded source images: ${inputImageUrls.length}`)
+    }
+
+    // Store metadata including input image URLs
+    const metadata: any = {
+      inputImageUrls: inputImageUrls.length > 0 ? inputImageUrls : undefined,
+      originalRequest: {
+        size: request.imageSize,
+        quality: request.quality,
+        n: request.n,
+        duration: request.duration,
+        resolution: request.resolution
+      }
+    }
 
     // Create initial record in api_usage table
     const newUsage: NewApiUsage = {
@@ -71,9 +104,11 @@ export class QueueService {
       userId,
       apiKeyId: request.apiKeyId,
       ip: request.ip,
+      metadata: JSON.stringify(metadata), // Store input image URLs and other metadata
       
       // Async-specific fields
       taskId,
+      taskType: type === 'image' ? 'imageInference' : 'videoInference',
       taskStatus: 'pending',
       taskProgress: 0,
       isAsync: true,
@@ -81,19 +116,19 @@ export class QueueService {
 
     await this.db.insert(apiUsage).values(newUsage)
 
-    // Queue the task for processing
+    // Queue ONLY the task ID (minimal payload to avoid size limits)
     const queueMessage: QueueMessage = {
       taskId,
       type,
       userId,
-      request,
+      request: {}, // Empty - will be fetched from database
       timestamp: Date.now(),
       usageId
     }
 
     await this.queue.send(queueMessage)
 
-    console.log(`Created async task ${taskId} and queued for processing`)
+    console.log(`[QueueService] Created task ${taskId}, uploaded ${inputImageUrls.length} source images, queued for processing`)
 
     return { taskId, usageId }
   }
@@ -193,60 +228,6 @@ export class QueueService {
 
     const record = result[0]
     if (!record) return null
-
-    // Handle test mode tasks
-    let metadata: any = {}
-    try {
-      metadata = record.metadata ? JSON.parse(record.metadata) : {}
-    } catch (e) {
-      // Ignore invalid metadata
-    }
-
-    // If this is a test task and enough time has passed, auto-complete it
-    if (metadata.test_mode && record.taskStatus === 'processing') {
-      const now = Date.now()
-      const createdAt = record.createdAt.getTime()
-      const elapsedMinutes = (now - createdAt) / (1000 * 60)
-      const expectedDuration = metadata.duration || 5 // Default 5 minutes
-
-      // Auto-complete test task after expected duration
-      if (elapsedMinutes >= expectedDuration) {
-        const mockVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-        
-        // Update the task to completed status
-        await this.db
-          .update(apiUsage)
-          .set({
-            taskStatus: 'completed',
-            taskProgress: 100,
-            taskCompletedAt: new Date(),
-            outputUrls: JSON.stringify([mockVideoUrl]),
-            cost: 1, // Mock cost in 1e-4 USD units (0.0001 USD)
-            provider: 'test'
-          })
-          .where(eq(apiUsage.taskId, taskId))
-
-        // Return completed status immediately
-        return {
-          taskId: record.taskId!,
-          type: record.taskId!.startsWith('img_') ? 'image' : 'video',
-          status: 'completed' as any,
-          progress: 100,
-          createdAt: record.createdAt.getTime(),
-          updatedAt: now,
-          completedAt: now,
-          model: record.model,
-          prompt: record.prompt,
-          imageSize: record.imageSize,
-          quality: record.quality,
-          result: {
-            created: Math.floor(now / 1000),
-            data: [{ url: mockVideoUrl }],
-            cost: 0.0001 // $0.0001 for test
-          }
-        }
-      }
-    }
 
     const outputUrls = record.outputUrls ? JSON.parse(record.outputUrls) : []
     
@@ -400,12 +381,14 @@ export function createQueueService(
   const db = c.get('db') as Database
   
   if (!db) {
-    throw new Error('Database not available')
+    throw new Error('Database not available - ensure database connection is configured')
   }
 
   const queue = c.env.ASYNC_QUEUE
   if (!queue) {
-    throw new Error('ASYNC_QUEUE not configured - async processing only available on Cloudflare deployment')
+    console.error('[QueueService] ASYNC_QUEUE binding not found in environment')
+    console.error('[QueueService] Available env keys:', Object.keys(c.env))
+    throw new Error('ASYNC_QUEUE binding not configured in wrangler.jsonc. Please add the queue binding to enable task processing.')
   }
 
   return new QueueService(queue, db)

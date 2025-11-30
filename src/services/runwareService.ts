@@ -15,6 +15,42 @@ export interface RunwareConfig {
 }
 
 /**
+ * Model search parameters
+ */
+export interface RunwareModelSearchParams {
+  search?: string
+  tags?: string[]
+  category?: 'checkpoint' | 'lora' | 'lycoris' | 'controlnet' | 'vae' | 'embeddings'
+  type?: 'base' | 'inpainting' | 'refiner'
+  architecture?: 'flux1s' | 'flux1d' | 'fluxpro' | 'fluxultra' | 'sdxl' | 'sd1x' | 'sd3' | 'pony' | 'imagen3' | 'imagen3fast' | 'imagen4preview' | 'imagen4ultra' | 'imagen4fast' | 'gemini_2_5_flash_image'
+  conditioning?: 'blur' | 'canny' | 'depth' | 'gray' | 'hed' | 'inpaint' | 'inpaintdepth' | 'lineart' | 'lowquality' | 'normal' | 'openmlsd' | 'openpose' | 'outfit' | 'pix2pix' | 'qrcode' | 'scribble' | 'seg' | 'shuffle' | 'sketch' | 'softedge' | 'tile'
+  visibility?: 'public' | 'private' | 'community' | 'favorite'
+  offset?: number
+  limit?: number
+}
+
+/**
+ * Model search result
+ */
+export interface RunwareModelSearchResult {
+  name: string
+  air: string
+  tags: string[]
+  heroImage?: string
+  category: string
+  private: boolean
+  comment?: string
+  version?: string
+  architecture?: string
+  type?: string
+  defaultWidth?: number
+  defaultHeight?: number
+  defaultSteps?: number
+  defaultScheduler?: string
+  defaultCFG?: number
+}
+
+/**
  * Image generation parameters (OpenAI-compatible format)
  */
 export interface RunwareImageParams {
@@ -412,6 +448,124 @@ export class RunwareService {
       return (result.data[0] as any)?.text || ''
     } catch (error) {
       throw new Error(`Runware image-to-text failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * Search for models in Runware catalog
+   * 
+   * @param params Search parameters including filters for category, type, architecture, etc.
+   * @returns Object containing search results with model metadata and pagination info
+   * 
+   * @example
+   * const results = await runwareService.searchModels({
+   *   search: 'realistic',
+   *   tags: ['photorealistic'],
+   *   category: 'checkpoint',
+   *   architecture: 'sdxl',
+   *   limit: 20,
+   *   offset: 0
+   * })
+   */
+  async searchModels(params: RunwareModelSearchParams): Promise<{
+    taskUUID: string
+    taskType: string
+    totalResults: number
+    results: RunwareModelSearchResult[]
+  }> {
+    console.log('[Runware Model Search] Starting model search')
+    console.log('[Runware Model Search] Search params:', JSON.stringify(params, null, 2))
+
+    // Generate a UUID v4 for this task (required by Runware API)
+    const taskUUID = crypto.randomUUID()
+
+    // Build the model search request according to Runware API spec
+    const task: any = {
+      taskType: 'modelSearch',
+      taskUUID: taskUUID
+    }
+
+    // Add search term if provided
+    if (params.search) {
+      task.search = params.search
+    }
+
+    // Add tags filter if provided
+    if (params.tags && params.tags.length > 0) {
+      task.tags = params.tags
+    }
+
+    // Add category filter if provided
+    if (params.category) {
+      task.category = params.category
+    }
+
+    // Add type filter if provided (only applicable for checkpoints)
+    if (params.type) {
+      task.type = params.type
+    }
+
+    // Add architecture filter if provided
+    if (params.architecture) {
+      task.architecture = params.architecture
+    }
+
+    // Add conditioning filter if provided (only applicable for ControlNet)
+    if (params.conditioning) {
+      task.conditioning = params.conditioning
+    }
+
+    // Add visibility filter (defaults to 'public' if not specified)
+    task.visibility = params.visibility || 'public'
+
+    // Add pagination parameters
+    task.offset = params.offset || 0
+    task.limit = Math.min(params.limit || 20, 100) // Max 100 per API spec
+
+    console.log('[Runware Model Search] Request task:', JSON.stringify(task, null, 2))
+
+
+    const testTask = {
+        "taskType": "modelSearch",
+        "taskUUID": taskUUID,
+        "search": "realistic",
+        "tags": "photorealistic",
+        "category": "checkpoint",
+        "type": "base",
+        "architecture": "sdxl",
+        "visibility": "public",
+        "offset": 0,
+        "limit": 20
+      }
+    
+
+    try {
+      const result = await this.makeRequest([testTask])
+
+      if (!result.data || result.data.length === 0) {
+        console.log('[Runware Model Search] No results returned')
+        return {
+          taskUUID,
+          taskType: 'modelSearch',
+          totalResults: 0,
+          results: []
+        }
+      }
+
+      // Extract the search results from the response
+      const searchData = result.data[0] as any
+
+      console.log(`[Runware Model Search] Found ${searchData.totalResults || 0} total results, returning ${searchData.results?.length || 0} models`)
+
+      return {
+        taskUUID: searchData.taskUUID || taskUUID,
+        taskType: searchData.taskType || 'modelSearch',
+        totalResults: searchData.totalResults || 0,
+        results: searchData.results || []
+      }
+    } catch (error) {
+      console.error('[Runware Model Search] Search failed:', error)
+      throw new Error(`Runware model search failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 }

@@ -1,11 +1,11 @@
 import { Context } from 'hono'
 import { CloudflareBindings, ContextVariables } from '../types/env'
-import { googleVideoModels } from '../shared/videoModels/google'
-import { runwareVideoModels } from '../shared/videoModels/runware'
+import { getModelService } from './modelService'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
-import { R2StorageService } from '../lib/storage'
+import { createStorageService } from '../lib/storage'
 import { VideoGenerationRequest, VideoGenerationResponse } from '../lib/validation'
+import {R2StorageService} from '../lib/storage'
 
 
 export interface VideoGenerationParams extends VideoGenerationRequest {
@@ -30,113 +30,22 @@ export interface VideoGenerationResult {
   cost?: number
   provider?: string
 }
-
 /**
- * Generate videos using Google models
+ * Generate videos for async processing (used by queue consumer)
+ * This bypasses the async check and uses real APIs
  */
 export async function generateVideo(
   c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
   params: VideoGenerationParams,
   userId: string
-): Promise<VideoGenerationResult> {
-  const startTime = Date.now()
-  
-  // Get model configuration from Google and Runware models
-  const allVideoModels = { ...googleVideoModels, ...runwareVideoModels }
-  const modelConfig = allVideoModels[params.model]
-  if (!modelConfig) {
-    throw new Error(`Model '${params.model}' not found`)
-  }
-
-  // Select provider
-  const providerIndex = selectProvider(modelConfig.providers, params as RequestParams)
-  const selectedProvider = modelConfig.providers[providerIndex]
-
-  if (!selectedProvider) {
-    throw new Error('Invalid provider selected')
-  }
-
-  // Get the actual model name for the provider
-  const actualModel = selectedProvider.model_name
-
-  // Apply image processing if needed
-  let processedParams = { ...params }
-  if (params.files?.image && typeof selectedProvider.applyImage === 'function') {
-    processedParams = await selectedProvider.applyImage(processedParams)
-  }
-
-  // Clean up files reference
-  delete processedParams.files
-
-  // Route to appropriate provider handler
-  let result: VideoGenerationResult
-  
-  switch (selectedProvider.id) {
-    case 'gemini':
-      // Google Veo API defaults to async mode for production scalability (5+ minutes)
-      if (c.req.query('async') === 'false') {
-        // For sync requests, return mock response (real API too slow for sync)
-        console.warn('Sync mode for Google Veo - using mock response (real API requires async=true)')
-        result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
-      } else {
-        // Default to async mode - handled by queue consumer
-        throw new Error('Async video generation should be handled by queue consumer')
-      }
-      break
-    case 'geminiVideo':
-      // Google Veo defaults to async mode for production scalability
-      if (c.req.query('async') === 'false') {
-        console.warn('Sync mode for Google Veo - using mock response (real API requires async=true)')
-        result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
-      } else {
-        // Default to async mode - handled by queue consumer
-        throw new Error('Async video generation should be handled by queue consumer')
-      }
-      break
-    case 'geminiMock':
-      result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
-    case 'vertex':
-      result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
-    case 'runware':
-      // Runware video generation
-      result = await generateRunwareVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
-    default:
-      throw new Error(`Provider '${selectedProvider.id}' not implemented`)
-  }
-
-  result.latency = Date.now() - startTime
-  result.provider = selectedProvider.id
-
-  // Process through storage service if not a test model
-  if (!params.model.includes('test')) {
-    const storageService = new R2StorageService(c.env.STORAGE_BUCKET, c.env.R2_BUCKET_NAME, c.env.R2_CUSTOM_PUBLIC_URL)
-    result = await processVideoResult(result, storageService, userId, params.response_format || 'url')
-  }
-
-  // Add async recommendation for Google models
-  if ((selectedProvider.id === 'gemini' || selectedProvider.id === 'geminiVideo') && c.req.query('async') !== 'true') {
-    console.log('Google Veo models work best with async=true for real video generation')
-  }
-
-  return result
-}
-
-/**
- * Generate videos for async processing (used by queue consumer)
- * This bypasses the async check and uses real APIs
- */
-export async function generateVideoAsync(
-  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
-  params: VideoGenerationParams,
-  userId: string
 ): Promise<VideoGenerationResult & { provider?: string }> {
   const startTime = Date.now()
-  
-  // Get model configuration
-  const modelConfig = googleVideoModels[params.model as keyof typeof googleVideoModels]
+
+  // Get model configuration from database
+  const db = c.get('db')
+  const modelService = getModelService(db)
+  const allVideoModels = await modelService.getActiveModelsAsObject('video')
+  const modelConfig = allVideoModels[params.model]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
   }
@@ -172,9 +81,6 @@ export async function generateVideoAsync(
       // Use real Google GenAI API for async processing
       result = await generateGeminiVideo(c, { ...processedParams, model: actualModel }, userId)
       break
-    case 'geminiMock':
-      result = await generateGeminiMockVideo(c, { ...processedParams, model: actualModel }, userId)
-      break
     case 'vertex':
       result = await generateVertexVideo(c, { ...processedParams, model: actualModel }, userId)
       break
@@ -190,29 +96,19 @@ export async function generateVideoAsync(
 
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
-    const storageService = new R2StorageService(c.env.STORAGE_BUCKET, c.env.R2_BUCKET_NAME, c.env.R2_CUSTOM_PUBLIC_URL)
-    result = await processVideoResult(result, storageService, userId, params.response_format || 'url')
+    const storageService = createStorageService(
+      c.env.R2_ACCOUNT_ID,
+      c.env.R2_ACCESS_KEY_ID,
+      c.env.R2_SECRET_ACCESS_KEY,
+      c.env.R2_BUCKET_NAME,
+      c.env.R2_CUSTOM_PUBLIC_URL
+    )
+    if (storageService) {
+      result = await processVideoResult(result, storageService, userId, params.response_format || 'url')
+    }
   }
 
   return { ...result, provider: selectedProvider.id }
-}
-
-/**
- * Generate mock videos for testing (geminiMock provider)
- */
-async function generateGeminiMockVideo(
-  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
-  params: VideoGenerationParams & { model: string },
-  userId: string
-): Promise<VideoGenerationResult> {
-  // Return a mock video response for testing
-  return {
-    created: Math.floor(Date.now() / 1000),
-    data: [{
-      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-    }],
-    latency: 100
-  }
 }
 
 /**
@@ -285,18 +181,51 @@ async function generateGeminiVideo(
   // Add image for image-to-video
   if (params.imagesData && params.imagesData.length > 0) {
     const imageData = params.imagesData[0]
+    console.log('[Video Service] Processing input image:', {
+      hasData: !!imageData.data,
+      hasType: !!imageData.type,
+      dataLength: imageData.data?.length || 0,
+      type: imageData.type
+    })
+    
     let base64Data: string
     
     if (imageData.data) {
       // Use structured base64 data directly
       base64Data = imageData.data
     } else {
-      throw new Error('Invalid image data format')
+      throw new Error('Invalid image data format: missing data field')
     }
     
+    const mimeType = imageData.type || (imageData as any).blob?.type || 'image/png'
+    
+    if (!base64Data || base64Data.length === 0) {
+      throw new Error('Invalid image data: empty base64 string')
+    }
+    
+    if (!mimeType) {
+      throw new Error('Invalid image data: missing mimeType')
+    }
+    
+    console.log('[Video Service] Setting image for Gemini:', {
+      mimeType,
+      base64Length: base64Data.length,
+      hasValidBase64: /^[A-Za-z0-9+/=]+$/.test(base64Data),
+      first50Chars: base64Data.substring(0, 50)
+    })
+    
+    // Set image for image-to-video generation
+    // IMPORTANT: The SDK expects "imageBytes" NOT "bytesBase64Encoded"!
+    // Based on the official example: image: { imageBytes: ..., mimeType: "image/png" }
     generateOptions.image = {
-      bytesBase64Encoded: base64Data,
-      mimeType: imageData.type || (imageData as any).blob?.type || 'image/png'
+      imageBytes: base64Data,
+      mimeType: mimeType
+    }
+    
+    // IMPORTANT: Remove aspectRatio if not explicitly set by user when using input image
+    // Some models don't support aspectRatio with image input
+    if (!params.aspect_ratio && !params.size) {
+      delete generateOptions.aspectRatio
     }
   }
 
@@ -314,6 +243,32 @@ async function generateGeminiVideo(
   }
 
   try {
+    // Log the complete request being sent to Gemini
+    console.log('[Video Service] Sending request to Gemini API:', {
+      model: generateOptions.model,
+      prompt: generateOptions.prompt?.substring(0, 100),
+      hasImage: !!generateOptions.image,
+      imageStructure: generateOptions.image ? {
+        hasImageBytes: !!generateOptions.image.imageBytes,
+        hasMimeType: !!generateOptions.image.mimeType,
+        mimeType: generateOptions.image.mimeType,
+        imageBytesLength: generateOptions.image.imageBytes?.length || 0
+      } : null,
+      aspectRatio: generateOptions.aspectRatio,
+      resolution: generateOptions.resolution,
+      allKeys: Object.keys(generateOptions)
+    })
+    
+    // Log the full generateOptions structure (without base64 data)
+    const logOptions = { ...generateOptions }
+    if (logOptions.image?.imageBytes) {
+      logOptions.image = {
+        ...logOptions.image,
+        imageBytes: `[${logOptions.image.imageBytes.length} chars]`
+      }
+    }
+    console.log('[Video Service] Full generateOptions:', JSON.stringify(logOptions, null, 2))
+    
     // Start the video generation operation
     let operation = await ai.models.generateVideos(generateOptions)
     
@@ -412,26 +367,60 @@ async function handleCompletedOperation(operation: any, providerKey: string, env
     throw new Error(`Veo generation failed: ${JSON.stringify(operation.error)}`)
   }
 
+  // Log the full operation response structure for debugging
+  console.log('[Video Service] ========== OPERATION RESPONSE ==========')
+  console.log('[Video Service] Full operation object keys:', Object.keys(operation))
+  console.log('[Video Service] operation.response keys:', operation.response ? Object.keys(operation.response) : 'null')
+  console.log('[Video Service] operation.response:', JSON.stringify(operation.response, null, 2))
+  console.log('[Video Service] =======================================')
+
   // Extract video data from the response
   const videoData = operation.response?.generatedVideos?.[0]
-  console.log('videoData', JSON.stringify(videoData))
+  console.log('[Video Service] videoData:', JSON.stringify(videoData, null, 2))
   
-  const videoUri = videoData?.video?.uri || videoData?.videoUri
+  if (videoData) {
+    console.log('[Video Service] videoData keys:', Object.keys(videoData))
+    console.log('[Video Service] videoData.video keys:', videoData.video ? Object.keys(videoData.video) : 'null')
+  }
   
-  if (videoUri) {
-    const videoResponse = await fetch(videoUri, {
-      headers: {
-        'x-goog-api-key': providerKey
-      }
-    })
+  // Try multiple possible locations for the video URI/file
+  const videoUri = videoData?.video?.uri || videoData?.videoUri || videoData?.video?.url
+  const videoFile = videoData?.video // This might be a File object from the SDK
+  
+  console.log('[Video Service] Extracted videoUri:', videoUri)
+  console.log('[Video Service] Extracted videoFile:', videoFile ? JSON.stringify(videoFile, null, 2) : 'null')
+  
+  // If we have a videoFile object, it might be a File reference from the SDK
+  // According to the SDK docs, videoData.video is a File object that needs to be downloaded
+  if (videoFile && typeof videoFile === 'object') {
+    console.log('[Video Service] Video is a File object, attempting SDK download...')
     
-    if (videoResponse.ok) {
+    // The SDK example shows: client.files.download(file=video.video)
+    // But in Node.js SDK, files are typically returned with a URI we need to fetch
+    // Let's try to get the URI from the file object
+    const fileUri = videoFile.uri || videoFile.url || videoFile.path
+    console.log('[Video Service] File URI from object:', fileUri)
+    
+    if (fileUri) {
+      const videoResponse = await fetch(fileUri, {
+        headers: {
+          'x-goog-api-key': providerKey
+        }
+      })
+      
+      if (videoResponse.ok) {
       // Store video in R2 storage instead of converting to base64
-      const storageService = new R2StorageService(
-        env?.STORAGE_BUCKET,
-        env?.R2_BUCKET_NAME,
-        env?.R2_CUSTOM_PUBLIC_URL
+      const storageService = createStorageService(
+        env?.R2_ACCOUNT_ID || '',
+        env?.R2_ACCESS_KEY_ID || '',
+        env?.R2_SECRET_ACCESS_KEY || '',
+        env?.R2_BUCKET_NAME || '',
+        env?.R2_CUSTOM_PUBLIC_URL || ''
       )
+      
+      if (!storageService) {
+        throw new Error('Storage service not configured')
+      }
       
       const videoBuffer = await videoResponse.arrayBuffer()
       
@@ -441,18 +430,32 @@ async function handleCompletedOperation(operation: any, providerKey: string, env
         contentType: 'video/mp4'
       })
       
-      return {
-        created: Math.floor(Date.now() / 1000),
-        data: [{
-          url: publicUrl,
-          revised_prompt: null
-        }]
+        return {
+          created: Math.floor(Date.now() / 1000),
+          data: [{
+            url: publicUrl,
+            revised_prompt: null
+          }]
+        }
+      } else {
+        throw new Error(`Failed to download generated video from file URI. Status: ${videoResponse.status} ${videoResponse.statusText}`)
       }
     } else {
-      throw new Error('Failed to download generated video')
+      throw new Error(`Video file object found but no URI available. File object keys: ${Object.keys(videoFile).join(', ')}`)
     }
   } else {
-    throw new Error('No video URI found in completed operation. Expected videoData.video.uri or videoData.videoUri')
+    // No URI found - log the full structure and throw descriptive error
+    const errorDetails = {
+      hasResponse: !!operation.response,
+      hasGeneratedVideos: !!operation.response?.generatedVideos,
+      generatedVideosLength: operation.response?.generatedVideos?.length || 0,
+      videoDataStructure: videoData ? Object.keys(videoData) : 'null',
+      fullResponse: JSON.stringify(operation.response, null, 2)
+    }
+    
+    console.error('[Video Service] Failed to find video URI. Details:', errorDetails)
+    
+    throw new Error(`No video URI found in completed operation. Response structure: ${JSON.stringify(errorDetails)}`)
   }
 }
 

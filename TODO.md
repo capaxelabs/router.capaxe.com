@@ -71,9 +71,9 @@ This document tracks the migration to Hono/Cloudflare Workers, focusing exclusiv
 - [x] Set up Google service account key handling
 
 ### 2.4 Google API Endpoints ✅
-- [x] `POST /v1/openai/images/generations` (Google models)
-- [x] `POST /v1/openai/images/edits` (Google models)
-- [x] `POST /v1/openai/videos/generations` (Google models)
+- [x] `POST /v1/images/generations` (Google models)
+- [x] `POST /v1/images/edits` (Google models)
+- [x] `POST /v1/videos/generations` (Google models)
 - [x] `GET /v1/models` (Google models)
 
 ### 2.5 Testing & Validation ✅
@@ -97,7 +97,7 @@ This document tracks the migration to Hono/Cloudflare Workers, focusing exclusiv
 - [ ] Verify pricing calculations for Runware models
 
 ### 3.2 Runware API Endpoints
-- [ ] Update `POST /v1/openai/images/generations` (ensure Runware models work)
+- [ ] Update `POST /v1/images/generations` (ensure Runware models work)
 - [ ] Update `GET /v1/models` (include Runware models in listing)
 - [ ] Test async processing with Runware models
 - [ ] Verify R2 storage integration for Runware outputs

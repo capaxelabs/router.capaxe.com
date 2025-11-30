@@ -57,8 +57,6 @@ export const VideoGenerationRequestSchema = z.object({
   resolution: z.enum(['720p', '1080p']).default('720p'),
   person_generation: z.enum(['allow_all', 'allow_adult', 'dont_allow']).default('allow_all'),
   seed: z.number().int().optional(),
-  // Test mode parameter
-  test: z.boolean().default(false),
   image: z.union([
     z.string(),  // Legacy: Base64 string or URL
     Base64ImageSchema, // Preferred: Structured base64 object  

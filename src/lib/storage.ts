@@ -6,25 +6,33 @@ interface R2UploadResult {
   buffer?: Buffer
 }
 
-export class R2StorageService {
-  private bucket: R2Bucket | null = null
-  private bucketName: string
-  private publicUrl: string
+interface R2Credentials {
+  accountId: string
+  accessKeyId: string
+  secretAccessKey: string
+  bucketName: string
+  publicUrl: string
+}
 
-  constructor(bucket: R2Bucket, bucketName: string, publicUrl: string) {
-    this.bucket = bucket
-    this.bucketName = bucketName
-    this.publicUrl = publicUrl
-    
-    console.log('[R2StorageService] Initialized with:')
-    console.log(`  - Bucket: ${bucket ? 'provided' : 'NULL/UNDEFINED'}`)
-    console.log(`  - BucketName: ${bucketName || 'EMPTY'}`)
-    console.log(`  - PublicURL: ${publicUrl || 'EMPTY'}`)
+export class R2StorageService {
+  private credentials: R2Credentials
+  private endpoint: string
+
+  constructor(credentials: R2Credentials) {
+    this.credentials = credentials
+    this.endpoint = `https://${credentials.accountId}.r2.cloudflarestorage.com/${credentials.bucketName}`
+
+    console.log('[R2StorageService] Initialized with REST API:')
+    console.log(`  - AccountID: ${credentials.accountId ? 'provided' : 'EMPTY'}`)
+    console.log(`  - BucketName: ${credentials.bucketName || 'EMPTY'}`)
+    console.log(`  - PublicURL: ${credentials.publicUrl || 'EMPTY'}`)
+    console.log(`  - Endpoint: ${this.endpoint}`)
     console.log(`  - isEnabled: ${this.isEnabled()}`)
   }
 
   isEnabled(): boolean {
-    return this.bucket !== null && !!this.bucketName
+    return !!(this.credentials.accountId && this.credentials.accessKeyId &&
+              this.credentials.secretAccessKey && this.credentials.bucketName)
   }
 
   generateFileName(contentType: string, type: 'image' | 'video' = 'image'): string {
@@ -54,36 +62,114 @@ export class R2StorageService {
     return typeMap[contentType] || ''
   }
 
-  // Internal helper that handles the actual R2 put request
+  // Generate AWS Signature V4
+  private async generateSignature(method: string, key: string, contentType: string, date: string, payloadHash: string): Promise<string> {
+    const region = 'auto'
+    const service = 's3'
+
+    // Create canonical request
+    const canonicalUri = `/${this.credentials.bucketName}/${key}`
+    const canonicalHeaders = `content-type:${contentType}\nhost:${this.credentials.accountId}.r2.cloudflarestorage.com\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${date}\n`
+    const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+    const canonicalRequest = `${method}\n${canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`
+
+    // Hash canonical request
+    const encoder = new TextEncoder()
+    const canonicalRequestHash = await crypto.subtle.digest('SHA-256', encoder.encode(canonicalRequest))
+    const canonicalRequestHashHex = Array.from(new Uint8Array(canonicalRequestHash)).map(b => b.toString(16).padStart(2, '0')).join('')
+
+    // Create string to sign
+    const dateStamp = date.substring(0, 8)
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+    const stringToSign = `AWS4-HMAC-SHA256\n${date}\n${credentialScope}\n${canonicalRequestHashHex}`
+
+    // Calculate signature
+    const kDate = await this.hmac(`AWS4${this.credentials.secretAccessKey}`, dateStamp)
+    const kRegion = await this.hmac(kDate, region)
+    const kService = await this.hmac(kRegion, service)
+    const kSigning = await this.hmac(kService, 'aws4_request')
+    const signature = await this.hmac(kSigning, stringToSign)
+
+    return Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  private async hmac(key: string | ArrayBuffer, data: string): Promise<ArrayBuffer> {
+    const encoder = new TextEncoder()
+    const keyData = typeof key === 'string' ? encoder.encode(key) : key
+    const cryptoKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    return await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(data))
+  }
+
+  private async sha256(data: ArrayBuffer): Promise<string> {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  // Internal helper that handles the actual R2 put request via REST API
   private async _uploadBody(body: ArrayBuffer | ReadableStream | string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
     console.log(`[R2 Upload] Starting upload - type: ${type}, contentType: ${contentType}`)
-    
-    if (!this.bucket) {
-      console.error('[R2 Upload] ERROR: R2 bucket not available')
-      throw new Error('R2 bucket not available')
+
+    if (!this.isEnabled()) {
+      console.error('[R2 Upload] ERROR: R2 credentials not configured')
+      throw new Error('R2 credentials not configured')
     }
 
     const fileName = this.generateFileName(contentType, type)
     console.log(`[R2 Upload] Generated filename: ${fileName}`)
 
     try {
-      const object = await this.bucket.put(fileName, body, {
-        httpMetadata: {
-          contentType: contentType
-        }
-      })
-
-      if (!object) {
-        console.error(`[R2 Upload] ERROR: bucket.put() returned null/undefined for ${fileName}`)
-        throw new Error('Failed to upload file to R2')
+      // Convert body to ArrayBuffer if needed
+      let bodyBuffer: ArrayBuffer
+      if (body instanceof ArrayBuffer) {
+        bodyBuffer = body
+      } else if (body instanceof ReadableStream) {
+        const response = new Response(body)
+        bodyBuffer = await response.arrayBuffer()
+      } else {
+        const encoder = new TextEncoder()
+        bodyBuffer = encoder.encode(body)
       }
 
-      console.log(`[R2 Upload] Successfully uploaded to R2: ${fileName}, key: ${object.key}, size: ${object.size} bytes`)
+      // Calculate payload hash
+      const payloadHash = await this.sha256(bodyBuffer)
 
-      // Preserve buffer if it's available for b64_json fallback
-      const maybeBuffer = body instanceof ArrayBuffer ? Buffer.from(body) : null
+      // Generate timestamp
+      const now = new Date()
+      const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+      const dateStamp = amzDate.substring(0, 8)
 
-      const publicUrl = this.publicUrl ? `${this.publicUrl}/${fileName}` : fileName
+      // Generate signature
+      const signature = await this.generateSignature('PUT', fileName, contentType, amzDate, payloadHash)
+
+      // Create authorization header
+      const credentialScope = `${dateStamp}/auto/s3/aws4_request`
+      const authorization = `AWS4-HMAC-SHA256 Credential=${this.credentials.accessKeyId}/${credentialScope}, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`
+
+      // Upload to R2
+      const url = `${this.endpoint}/${fileName}`
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': contentType,
+          'x-amz-content-sha256': payloadHash,
+          'x-amz-date': amzDate,
+          'Authorization': authorization
+        },
+        body: bodyBuffer
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`[R2 Upload] ERROR: Upload failed - ${response.status} ${response.statusText}`, errorText)
+        throw new Error(`Failed to upload to R2: ${response.status} ${response.statusText}`)
+      }
+
+      console.log(`[R2 Upload] Successfully uploaded to R2: ${fileName}`)
+
+      // Preserve buffer if needed for b64_json fallback
+      const maybeBuffer = Buffer.from(bodyBuffer)
+
+      const publicUrl = `${this.credentials.publicUrl}/${fileName}`
       console.log(`[R2 Upload] Generated public URL: ${publicUrl}`)
 
       return {
@@ -92,14 +178,14 @@ export class R2StorageService {
         buffer: maybeBuffer
       }
     } catch (error) {
-      console.error(`[R2 Upload] ERROR during bucket.put():`, error)
+      console.error(`[R2 Upload] ERROR during upload:`, error)
       throw error
     }
   }
 
   async downloadAndUpload(url: string, contentType: string, type: 'image' | 'video' = 'image', needBuffer = false): Promise<R2UploadResult> {
     console.log(`[R2 Download] Starting download from: ${url}`)
-    console.log(`[R2 Download] Storage enabled: ${this.isEnabled()}, bucket: ${this.bucket ? 'available' : 'null'}, bucketName: ${this.bucketName}, publicUrl: ${this.publicUrl}`)
+    console.log(`[R2 Download] Storage enabled: ${this.isEnabled()}, bucketName: ${this.credentials.bucketName}, publicUrl: ${this.credentials.publicUrl}`)
     
     if (!this.isEnabled()) {
       console.error('[R2 Download] ERROR: Storage service is not configured')
@@ -135,9 +221,71 @@ export class R2StorageService {
     }
   }
 
+  /**
+   * Upload source/input image to R2 (for queue optimization)
+   * Stores in source/YYYY/MM/DD/[cuid].ext
+   */
+  async uploadSourceImage(base64Data: string, contentType: string): Promise<string> {
+    console.log(`[R2 Source] Uploading source image - contentType: ${contentType}`)
+    
+    if (!this.isEnabled()) {
+      throw new Error('Storage service is not configured')
+    }
+
+    try {
+      const base64Content = base64Data.replace(/^data:[^;]+;base64,/, '')
+      const binaryData = atob(base64Content)
+      const bytes = new Uint8Array(binaryData.length)
+      for (let i = 0; i < binaryData.length; i++) {
+        bytes[i] = binaryData.charCodeAt(i)
+      }
+
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = String(now.getMonth() + 1).padStart(2, '0')
+      const day = String(now.getDate()).padStart(2, '0')
+      const extension = this.getExtensionFromContentType(contentType).replace('.', '')
+      const fileName = `source/${year}/${month}/${day}/${cuid()}.${extension}`
+
+      // Upload to R2
+      const bodyBuffer = bytes.buffer
+      const payloadHash = await this.sha256(bodyBuffer)
+      const date = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '')
+      const amzDate = date
+
+      const signature = await this.generateSignature('PUT', fileName, contentType, amzDate, payloadHash)
+      const dateStamp = date.substring(0, 8)
+      const credentialScope = `${dateStamp}/auto/s3/aws4_request`
+      const authorization = `AWS4-HMAC-SHA256 Credential=${this.credentials.accessKeyId}/${credentialScope}, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`
+
+      const uploadUrl = `https://${this.credentials.accountId}.r2.cloudflarestorage.com/${this.credentials.bucketName}/${fileName}`
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': contentType,
+          'x-amz-content-sha256': payloadHash,
+          'x-amz-date': amzDate,
+          'Authorization': authorization
+        },
+        body: bodyBuffer
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to upload source image: ${response.status}`)
+      }
+
+      const publicUrl = `${this.credentials.publicUrl}/${fileName}`
+      console.log(`[R2 Source] Successfully uploaded: ${publicUrl}`)
+      return publicUrl
+    } catch (error) {
+      console.error('[R2 Source] Upload error:', error)
+      throw error
+    }
+  }
+
   async uploadBase64(base64Data: string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
     console.log(`[R2 Base64] Starting base64 upload - type: ${type}, contentType: ${contentType}`)
-    console.log(`[R2 Base64] Storage enabled: ${this.isEnabled()}, bucket: ${this.bucket ? 'available' : 'null'}`)
+    console.log(`[R2 Base64] Storage enabled: ${this.isEnabled()}`)
     
     if (!this.isEnabled()) {
       console.error('[R2 Base64] ERROR: Storage service is not configured')
@@ -299,7 +447,7 @@ export class R2StorageService {
     }
   }
 
-  // Legacy methods for compatibility with existing R2 API
+  // Legacy method for compatibility - now uses S3 REST API
   async uploadFile(
     key: string,
     data: ArrayBuffer | ReadableStream | string,
@@ -309,23 +457,58 @@ export class R2StorageService {
       customMetadata?: Record<string, string>
     }
   ): Promise<string> {
-    if (!this.bucket) {
-      throw new Error('R2 bucket not available')
+    if (!this.isEnabled()) {
+      throw new Error('R2 credentials not configured')
     }
 
-    const object = await this.bucket.put(key, data, {
-      httpMetadata: {
-        contentType: options?.contentType || 'application/octet-stream',
-        ...options?.metadata,
+    const contentType = options?.contentType || 'application/octet-stream'
+
+    // Convert data to ArrayBuffer if needed
+    let bodyBuffer: ArrayBuffer
+    if (data instanceof ArrayBuffer) {
+      bodyBuffer = data
+    } else if (data instanceof ReadableStream) {
+      const response = new Response(data)
+      bodyBuffer = await response.arrayBuffer()
+    } else {
+      const encoder = new TextEncoder()
+      bodyBuffer = encoder.encode(data)
+    }
+
+    // Calculate payload hash
+    const payloadHash = await this.sha256(bodyBuffer)
+
+    // Generate timestamp
+    const now = new Date()
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+    const dateStamp = amzDate.substring(0, 8)
+
+    // Generate signature
+    const signature = await this.generateSignature('PUT', key, contentType, amzDate, payloadHash)
+
+    // Create authorization header
+    const credentialScope = `${dateStamp}/auto/s3/aws4_request`
+    const authorization = `AWS4-HMAC-SHA256 Credential=${this.credentials.accessKeyId}/${credentialScope}, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`
+
+    // Upload to R2
+    const url = `${this.endpoint}/${key}`
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+        'x-amz-content-sha256': payloadHash,
+        'x-amz-date': amzDate,
+        'Authorization': authorization
       },
-      customMetadata: options?.customMetadata,
+      body: bodyBuffer
     })
 
-    if (!object) {
-      throw new Error('Failed to upload file to R2')
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Failed to upload to R2: ${response.status} ${response.statusText} - ${errorText}`)
     }
 
-    return this.publicUrl ? `${this.publicUrl}/${key}` : key
+    return `${this.credentials.publicUrl}/${key}`
   }
 
   generateKey(filename: string, userId?: string): string {
@@ -341,22 +524,34 @@ export class R2StorageService {
   }
 }
 
-// Factory function to create storage service from environment and R2 bucket
+// Factory function to create storage service from R2 credentials
 export function createStorageService(
-  bucket: R2Bucket | undefined,
-  bucketName?: string,
-  publicUrl?: string
+  accountId: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  bucketName: string,
+  publicUrl: string
 ): R2StorageService | null {
   console.log('[createStorageService] Creating storage service with:')
-  console.log(`  - bucket: ${bucket ? 'provided' : 'NULL/UNDEFINED'}`)
+  console.log(`  - accountId: ${accountId || 'EMPTY'}`)
+  console.log(`  - accessKeyId: ${accessKeyId ? 'provided' : 'EMPTY'}`)
+  console.log(`  - secretAccessKey: ${secretAccessKey ? 'provided' : 'EMPTY'}`)
   console.log(`  - bucketName: ${bucketName || 'EMPTY'}`)
   console.log(`  - publicUrl: ${publicUrl || 'EMPTY'}`)
   
-  if (!bucket || !bucketName || !publicUrl) {
-    console.warn('[createStorageService] WARNING: R2 bucket, bucket name, or public URL not provided. Storage service will be disabled.')
-    console.warn(`  Missing: ${!bucket ? 'bucket ' : ''}${!bucketName ? 'bucketName ' : ''}${!publicUrl ? 'publicUrl' : ''}`)
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName || !publicUrl) {
+    console.warn('[createStorageService] WARNING: Missing required R2 credentials. Storage service will be disabled.')
+    console.warn(`  Missing: ${!accountId ? 'accountId ' : ''}${!accessKeyId ? 'accessKeyId ' : ''}${!secretAccessKey ? 'secretAccessKey ' : ''}${!bucketName ? 'bucketName ' : ''}${!publicUrl ? 'publicUrl' : ''}`)
     return null
   }
 
-  return new R2StorageService(bucket, bucketName, publicUrl)
+  const credentials: R2Credentials = {
+    accountId,
+    accessKeyId,
+    secretAccessKey,
+    bucketName,
+    publicUrl
+  }
+
+  return new R2StorageService(credentials)
 }

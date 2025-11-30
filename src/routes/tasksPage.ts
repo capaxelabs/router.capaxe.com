@@ -258,7 +258,7 @@ app.get('/', async (c) => {
         
         ${tasks.length === 0 ? `
             <div class="no-tasks">
-                <p>No async tasks found. Try creating an async task with <code>?async=true</code></p>
+                <p>No tasks found. Generate an image or video to see tasks here.</p>
             </div>
         ` : tasks.map(task => {
             const taskType = task.taskId?.startsWith('img_') ? 'image' : task.taskId?.startsWith('vid_') ? 'video' : 'unknown'

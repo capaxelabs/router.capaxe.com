@@ -1,6 +1,0 @@
-{
-  "error": {
-    "message": "Model 'invalid/model' not found",
-    "type": "image_generation_error"
-  }
-}

@@ -1,0 +1,77 @@
+meta {
+  name: Runware Model Search (GET)
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{APP_URL}}/v1/runware/models/search?search=realistic&category=checkpoint&architecture=sdxl&limit=10&offset=0
+  body: none
+  auth: none
+}
+
+params:query {
+  search: realistic
+  category: checkpoint
+  architecture: sdxl
+  limit: 10
+  offset: 0
+}
+
+tests {
+  test("Status should be 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should return data array", function() {
+    expect(res.getBody().data).to.be.an('array');
+  });
+  
+  test("Should contain search results with correct filters applied", function() {
+    const searchData = res.getBody().data[0];
+    expect(searchData).to.have.property('taskType');
+    expect(searchData).to.have.property('totalResults');
+    expect(searchData).to.have.property('results');
+    
+    const results = searchData.results;
+    if (results && results.length > 0) {
+      // Verify filters were applied
+      results.forEach(model => {
+        expect(model.category).to.equal('checkpoint');
+        expect(model.architecture).to.equal('sdxl');
+      });
+    }
+  });
+}
+
+docs {
+  Simple GET endpoint for model search using query parameters.
+  
+  ## Query Parameters:
+  - search: Search term
+  - tags: Comma-separated tags (e.g., "photorealistic,realistic")
+  - category: Model category (checkpoint, lora, controlnet, etc.)
+  - type: Model type (base, inpainting, refiner)
+  - architecture: Model architecture (sdxl, flux1d, sd3, pony, etc.)
+  - conditioning: ControlNet conditioning type
+  - visibility: Visibility filter (public, private, all)
+  - offset: Pagination offset
+  - limit: Results per page (max 100)
+  
+  ## Examples:
+  
+  1. Search for FLUX models:
+     GET /v1/runware/models/search?architecture=flux1d&limit=20
+  
+  2. Search for ControlNet with Canny:
+     GET /v1/runware/models/search?category=controlnet&conditioning=canny
+  
+  3. Search with multiple tags:
+     GET /v1/runware/models/search?tags=photorealistic,realistic&category=checkpoint
+  
+  4. Paginated search:
+     GET /v1/runware/models/search?search=anime&offset=20&limit=20
+  
+  This endpoint is useful for quick searches and simple HTTP client integration.
+  For complex searches with multiple filter combinations, use the POST endpoint.
+}

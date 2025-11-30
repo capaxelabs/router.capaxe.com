@@ -22,7 +22,7 @@ app.use('*', generalLimiter)
 app.use('*', getDb())
 
 // Health check endpoint
-app.get('/health', healthCheck)
+app.get('/healthz', healthCheck)
 
 // IP debug endpoint
 app.get('/ip', (c) => {
@@ -49,15 +49,20 @@ app.get('/', (c) => {
 import modelsRoutes from './routes/models.js'
 import imageRoutes from './routes/images'
 import videoRoutes from './routes/videos'
-import adminRoutes from './routes/admin'
+import mediaRoutes from './routes/media'
+import playgroundRoutes from './routes/playground'
 import taskRoutes from './routes/tasks'
 import tasksPage from './routes/tasksPage'
+import runwareRoutes from './routes/runware'
 
 // Models listing endpoint (Google models only for Phase 2)
 app.route('/v1/models', modelsRoutes)
 
+// Runware model search endpoints
+app.route('/v1/runware/models', runwareRoutes)
+
 // Models HTML page at /models
-app.route('/models', modelsRoutes)
+// app.route('/models', modelsRoutes)
 
 // Static files served from public directory via Cloudflare Workers Assets
 // Configured in wrangler.jsonc: assets = { directory = "public" }
@@ -68,14 +73,16 @@ app.route('/v1/images', imageRoutes)
 // Video generation routes
 app.route('/v1/videos', videoRoutes)
 
+// Unified media gallery (images and videos)
+app.route('/v1/media', mediaRoutes)
+
 // Task management routes for async processing
 app.route('/v1/tasks', taskRoutes)
 
 // Tasks web page for viewing all tasks
 app.route('/tasks', tasksPage)
 
-// Admin routes for database seeding and management
-app.route('/admin', adminRoutes)
+// app.route('/playground', playgroundRoutes)
 
 // Placeholder routes for authentication (future implementation)
 // app.route('/v1/auth', authRoutes)

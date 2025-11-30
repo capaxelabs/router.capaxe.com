@@ -44,6 +44,9 @@ export const apiUsage = sqliteTable('api_usage', {
   
   // Async task fields
   taskId: text('task_id'), // Links to async task
+  taskType: text('task_type', { 
+    enum: ['imageInference', 'videoInference', 'imageBackgroundRemoval', 'imageUpscale', 'imageCaption'] 
+  }), // Type of generation task
   taskStatus: text('task_status', { 
     enum: ['sync', 'pending', 'processing', 'completed', 'failed'] 
   }).default('sync').notNull(),

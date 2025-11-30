@@ -1,0 +1,1 @@
+ALTER TABLE `api_usage` ADD `task_type` text;

@@ -1,11 +1,16 @@
 /**
  * Model Migration Script
  * 
- * Migrates all existing model definitions from TypeScript files to the database.
- * Run this once to populate the models table.
+ * DEPRECATED: Database is already seeded. This file is kept for reference only.
  * 
- * Usage:
- *   npm run seed-models
+ * Historical script that migrated model definitions from TypeScript files to the database.
+ * The static model files have been removed as the database is now the source of truth.
+ * 
+ * To re-run migration (if needed):
+ *   1. Restore model files from git history
+ *   2. Run: npm run seed-models
+ * 
+ * Note: This script will fail if model files don't exist.
  */
 
 import { createClient } from '@libsql/client'
@@ -29,7 +34,6 @@ import Imagen40606Ultra from '../../shared/imageModels/google/imagen-4-06-06-ult
 
 // Google Video Models
 import Veo2 from '../../shared/videoModels/google/veo-2'
-import Veo2Mock from '../../shared/videoModels/google/veo-2-mock'
 import Veo3 from '../../shared/videoModels/google/veo-3'
 import Veo3Fast from '../../shared/videoModels/google/veo-3-fast'
 
@@ -295,21 +299,6 @@ const MODEL_METADATA: ModelMetadata[] = [
       aspectRatios: ['16:9', '9:16'],
       resolutions: ['720p'],
       maxDurationSeconds: 8,
-    },
-  },
-  {
-    instance: new Veo2Mock(),
-    name: 'Veo 2 Mock',
-    slug: 'veo-2-mock',
-    type: 'video',
-    status: 'inactive',
-    description: 'Mock version of Veo 2 for testing',
-    category: 'video-generation',
-    tags: ['video', 'mock', 'testing', 'google'],
-    capabilities: {
-      supportsImage: true,
-      aspectRatios: ['16:9', '9:16'],
-      resolutions: ['720p'],
     },
   },
   {

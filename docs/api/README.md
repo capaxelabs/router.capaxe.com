@@ -42,6 +42,11 @@ This directory contains comprehensive API documentation for the ImageRouter API 
 - **Edit Image - Multipart** - Edit existing images with file upload (⚡ ASYNC DEFAULT)
 - **Edit Image - Base64 Input** - ⭐ NEW: Edit images using base64 data (⚡ ASYNC DEFAULT)
 
+### Runware Model Search (⭐ NEW!)
+- **Runware Model Search (POST)** - Advanced model search with all filters
+- **Runware Model Search (GET)** - Simple search using query parameters
+- **Runware Model List** - List all available models with pagination
+
 ### Video Generation
 - **Generate Video - Veo** - Create videos using Veo models (⚡ ASYNC DEFAULT)
 - **Generate Video - Image to Video** - Animate static images into videos (⚡ ASYNC DEFAULT)
@@ -100,13 +105,13 @@ Currently, the API doesn't require authentication for testing, but in production
 ## ⚡ Async-First API Workflow
 
 ### Default Async Workflow (Recommended)
-1. **Submit Request**: `POST /v1/openai/images/generations` (no query params needed)
+1. **Submit Request**: `POST /v1/images/generations` (no query params needed)
 2. **Receive Task ID**: Get immediate response with `taskId`, `status: "pending"`
 3. **Check Status**: `GET /v1/tasks/{taskId}` (requires Authorization header)
 4. **Get Results**: When `status: "completed"`, retrieve generated content
 
 ### Legacy Sync Workflow
-1. **Submit Request**: `POST /v1/openai/images/generations?sync=true`
+1. **Submit Request**: `POST /v1/images/generations?sync=true`
 2. **Wait for Response**: Request blocks until generation completes
 3. **Get Results**: Image data returned directly in response
 
@@ -446,7 +451,7 @@ Run tests by executing requests in Bruno. Test scripts will automatically valida
 
 ### Before (Multipart Upload)
 ```bash
-curl -X POST https://imagerouter.capaxe.com/v1/openai/images/edits \
+curl -X POST https://imagerouter.capaxe.com/v1/images/edits \
   -F "model=google/gemini-2.5-flash" \
   -F "prompt=Add a red hat" \
   -F "image=@photo.jpg"
@@ -457,7 +462,7 @@ curl -X POST https://imagerouter.capaxe.com/v1/openai/images/edits \
 # Convert image to base64 first
 BASE64_DATA=$(base64 -i photo.jpg)
 
-curl -X POST https://imagerouter.capaxe.com/v1/openai/images/edits \
+curl -X POST https://imagerouter.capaxe.com/v1/images/edits \
   -H "Content-Type: application/json" \
   -d '{
     "model": "google/gemini-2.5-flash",
@@ -474,7 +479,7 @@ curl -X POST https://imagerouter.capaxe.com/v1/openai/images/edits \
 
 **Before (Multipart Upload):**
 ```bash
-curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations \
+curl -X POST https://imagerouter.capaxe.com/v1/videos/generations \
   -F "model=google/veo-3-fast" \
   -F "prompt=Animate this image" \
   -F "image=@reference.jpg" \
@@ -485,7 +490,7 @@ curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations \
 ```bash
 BASE64_DATA=$(base64 -i reference.jpg)
 
-curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations?async=true \
+curl -X POST https://imagerouter.capaxe.com/v1/videos/generations?async=true \
   -H "Content-Type: application/json" \
   -d '{
     "model": "google/veo-3-fast",
@@ -514,12 +519,61 @@ curl -X POST https://imagerouter.capaxe.com/v1/openai/videos/generations?async=t
 - **Sync mode requires parameter**: Add `?sync=true` for old behavior
 - **Task checking requires auth**: Use Authorization header for `/v1/tasks/{taskId}`
 
+## 🔍 Runware Model Search
+
+The Runware Model Search API allows you to discover and explore models in the Runware catalog. Once you find a model, use its `air` identifier in your image generation requests.
+
+### Search with Filters (POST)
+```json
+POST /v1/runware/models/search
+
+{
+  "search": "realistic",
+  "tags": ["photorealistic"],
+  "category": "checkpoint",
+  "architecture": "sdxl",
+  "limit": 10
+}
+```
+
+### Simple Search (GET)
+```
+GET /v1/runware/models/search?search=realistic&category=checkpoint&architecture=sdxl
+```
+
+### List All Models
+```
+GET /v1/runware/models?offset=0&limit=20
+```
+
+### Using Search Results
+Once you find a model, use its `air` identifier in generation:
+```json
+{
+  "model": "civitai:305149@392545",
+  "prompt": "your prompt here",
+  "size": "1024x1024"
+}
+```
+
+### Available Filters
+- **category**: checkpoint, lora, controlnet, vae, embeddings, lycoris
+- **type**: base, inpainting, refiner (for checkpoints)
+- **architecture**: sdxl, flux1d, sd3, pony, imagen3, and more
+- **conditioning**: canny, depth, pose, etc. (for ControlNet)
+- **visibility**: public, private, community, favorite (default: public)
+- **tags**: Array of tags to filter by
+
+For detailed documentation, see [RUNWARE_MODEL_SEARCH.md](../../RUNWARE_MODEL_SEARCH.md)
+
 ## 📚 Additional Resources
 
 - [ImageRouter Documentation](https://docs.imagerouter.capaxe.com)
+- [Runware Model Search Guide](../../RUNWARE_MODEL_SEARCH.md)
 - [Bruno Documentation](https://docs.usebruno.com)
 - [Google Gemini API Docs](https://ai.google.dev/docs)
 - [Google Vertex AI Docs](https://cloud.google.com/vertex-ai/docs)
+- [Runware API Docs](https://docs.runware.ai/)
 
 ## 🤝 Contributing
 

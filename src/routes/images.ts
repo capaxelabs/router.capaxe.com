@@ -6,8 +6,7 @@ import { validateApiKey } from '../middleware/apiKeyMiddleware'
 import { ImageGenerationRequest, validateImageRequest } from '../lib/validation'
 import type { NewApiUsage } from '../db/schema'
 import { createQueueService } from '../services/queueService'
-import { googleImageModels } from '../shared/imageModels/google'
-import { runwareImageModels } from '../shared/imageModels/runware'
+import { getModelService } from '../services/modelService'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
@@ -67,7 +66,9 @@ app.post('/generations',
       }
 
       // ASYNC MODE ONLY: Validate model exists before creating task
-      const allImageModels = { ...googleImageModels, ...runwareImageModels }
+      const db = c.get('db')
+      const modelService = getModelService(db)
+      const allImageModels = await modelService.getActiveModelsAsObject('image')
       
       if (!allImageModels[validatedData.model]) {
         return c.json({
@@ -81,16 +82,32 @@ app.post('/generations',
       
       // Create task and return immediately
       try {
+        // Create storage service for uploading source images
+        const { createStorageService } = await import('../lib/storage')
+        const storageService = createStorageService(
+          c.env.R2_ACCOUNT_ID,
+          c.env.R2_ACCESS_KEY_ID,
+          c.env.R2_SECRET_ACCESS_KEY,
+          c.env.R2_BUCKET_NAME,
+          c.env.R2_CUSTOM_PUBLIC_URL
+        )
+
         const queueService = createQueueService(c)
-        const { taskId } = await queueService.createAsyncTask('image', authenticatedUser!.id, {
-          model: validatedData.model,
-          prompt: validatedData.prompt,
-          imageSize: validatedData.size,
-          quality: validatedData.quality,
-          apiKeyId: authenticatedUser!.apiKeyId,
-          ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
-          ...requestData // Include all request data
-        })
+        const { taskId } = await queueService.createAsyncTask(
+          'image',
+          authenticatedUser!.id,
+          {
+            model: validatedData.model,
+            prompt: validatedData.prompt,
+            imageSize: validatedData.size,
+            quality: validatedData.quality,
+            n: validatedData.n,
+            apiKeyId: authenticatedUser!.apiKeyId,
+            ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
+            imagesData: requestData.imagesData // Pass input images
+          },
+          storageService // Pass storage service for uploading source images
+        )
 
         return c.json({
           taskId,
@@ -141,8 +158,8 @@ app.post('/generations',
         
         return c.json({
           error: {
-            message: 'Async processing not available. Please deploy to Cloudflare Workers to enable queue-based async processing.',
-            type: 'async_unavailable',
+            message: 'Failed to queue image generation task. The queue service is unavailable.',
+            type: 'queue_unavailable',
             details: (queueError as Error).message
           }
         }, 503) // Service Unavailable
@@ -199,10 +216,6 @@ app.post('/edits',
       const validatedData = c.req.valid('json') as ImageGenerationRequest
       const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
-      
-      // Check if sync mode is requested (async is now default)
-      const isSync = c.req.query('sync') === 'true'
-      const isAsync = !isSync
 
       // Create request with potential file data or base64 data
       const requestWithImages: any = { ...validatedData }
@@ -238,54 +251,45 @@ app.post('/edits',
         requestWithImages.files = parsedFiles
       }
 
-      if (isAsync) {
-        // ASYNC MODE: Create task and return immediately
-        try {
-          const queueService = createQueueService(c)
-          const { taskId } = await queueService.createAsyncTask('image', authenticatedUser!.id, {
+      // Create async task and return immediately
+      try {
+        // Create storage service for uploading source images
+        const { createStorageService } = await import('../lib/storage')
+        const storageService = createStorageService(
+          c.env.R2_ACCOUNT_ID,
+          c.env.R2_ACCESS_KEY_ID,
+          c.env.R2_SECRET_ACCESS_KEY,
+          c.env.R2_BUCKET_NAME,
+          c.env.R2_CUSTOM_PUBLIC_URL
+        )
+
+        const queueService = createQueueService(c)
+        const { taskId } = await queueService.createAsyncTask(
+          'image',
+          authenticatedUser!.id,
+          {
             model: validatedData.model,
             prompt: validatedData.prompt,
             imageSize: validatedData.size,
             quality: validatedData.quality,
             apiKeyId: authenticatedUser!.apiKeyId,
             ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
-            ...requestWithImages // Include all request data including files
-          })
+            imagesData: requestWithImages.imagesData // Pass input images
+          },
+          storageService
+        )
 
-          return c.json({
-            taskId,
-            status: 'pending',
-            type: 'image',
-            createdAt: Date.now(),
-            message: 'Image editing task created. Use GET /v1/tasks/:taskId to check status.'
-          })
+        return c.json({
+          taskId,
+          status: 'pending',
+          type: 'image',
+          createdAt: Date.now(),
+          message: 'Image editing task created. Use GET /v1/tasks/:taskId to check status.'
+        })
 
-        } catch (queueError) {
-          console.error('Failed to create async image editing task:', queueError)
-          return c.json({
-            error: {
-              message: 'Failed to create async image editing task. Please add ?sync=true for synchronous generation or try again.',
-              type: 'async_creation_error'
-            }
-          }, 500)
-        }
-        
-      } else {
-        // SYNC MODE: Process immediately (existing behavior)
-        const result = await imageGenerationHandler(c, requestWithImages)
-
-        // Return in OpenAI-compatible format
-        const response: ImageGenerationResponse = {
-          created: result.created,
-          data: result.data.map(item => ({
-            url: item.url,
-            b64_json: item.b64_json,
-            revised_prompt: item.revised_prompt || undefined
-          })),
-          cost: result.cost
-        }
-
-        return c.json(response)
+      } catch (queueError) {
+        console.error('Failed to create async image editing task:', queueError)
+        throw queueError // Rethrow to be caught by outer error handler
       }
 
     } catch (error: unknown) {
@@ -329,5 +333,127 @@ app.post('/variations', async (c) => {
     }
   }, 501)
 })
+
+/**
+ * GET /v1/images/user/list
+ * Get user's generated images with pagination and filtering
+ */
+app.get('/user/list',
+  ipLimiter,
+  validateApiKey,
+  async (c) => {
+    try {
+      const authenticatedUser = c.get('authenticatedUser')
+      if (!authenticatedUser) {
+        return c.json({
+          error: {
+            message: 'Authentication required',
+            type: 'unauthorized'
+          }
+        }, 401)
+      }
+
+      // Parse query parameters
+      const limit = Math.min(Number(c.req.query('limit')) || 20, 100) // Max 100 items
+      const offset = Number(c.req.query('offset')) || 0
+      const status = c.req.query('status') as 'completed' | 'failed' | 'pending' | 'processing' | undefined
+      const model = c.req.query('model') // Optional model filter
+
+      // Validate status parameter
+      if (status && !['completed', 'failed', 'pending', 'processing'].includes(status)) {
+        return c.json({
+          error: {
+            message: 'Invalid status parameter. Must be one of: completed, failed, pending, processing',
+            type: 'invalid_request'
+          }
+        }, 400)
+      }
+
+      const db = c.get('db')
+      const { apiUsage } = await import('../db/schema')
+      const { eq, and, desc, like, or, isNull } = await import('drizzle-orm')
+
+      // Build query conditions - filter for images only (taskId starts with 'img_' or no taskId)
+      const conditions = [
+        eq(apiUsage.userId, authenticatedUser.id),
+        or(
+          like(apiUsage.taskId, 'img_%'),
+          isNull(apiUsage.taskId)
+        )
+      ]
+
+      if (status) {
+        conditions.push(eq(apiUsage.taskStatus, status))
+      }
+
+      if (model) {
+        conditions.push(eq(apiUsage.model, model))
+      }
+
+      // Fetch images with pagination
+      const images = await db
+        .select({
+          id: apiUsage.id,
+          taskId: apiUsage.taskId,
+          model: apiUsage.model,
+          provider: apiUsage.provider,
+          prompt: apiUsage.prompt,
+          imageSize: apiUsage.imageSize,
+          quality: apiUsage.quality,
+          outputUrls: apiUsage.outputUrls,
+          cost: apiUsage.cost,
+          status: apiUsage.status,
+          taskStatus: apiUsage.taskStatus,
+          taskProgress: apiUsage.taskProgress,
+          error: apiUsage.error,
+          createdAt: apiUsage.createdAt,
+          taskCompletedAt: apiUsage.taskCompletedAt
+        })
+        .from(apiUsage)
+        .where(and(...conditions))
+        .orderBy(desc(apiUsage.createdAt))
+        .limit(limit)
+        .offset(offset)
+
+      // Parse outputUrls from JSON strings and format response
+      const formattedImages = images.map((img: any) => ({
+        id: img.id,
+        taskId: img.taskId,
+        model: img.model,
+        provider: img.provider,
+        prompt: img.prompt,
+        imageSize: img.imageSize,
+        quality: img.quality,
+        images: img.outputUrls ? JSON.parse(img.outputUrls) : [],
+        cost: img.cost / 10000, // Convert to USD
+        status: img.status,
+        taskStatus: img.taskStatus,
+        taskProgress: img.taskProgress,
+        error: img.error,
+        createdAt: img.createdAt.getTime(),
+        completedAt: img.taskCompletedAt?.getTime()
+      }))
+
+      return c.json({
+        data: formattedImages,
+        pagination: {
+          limit,
+          offset,
+          count: formattedImages.length,
+          hasMore: formattedImages.length === limit
+        }
+      })
+
+    } catch (error) {
+      console.error('User images list error:', error)
+      return c.json({
+        error: {
+          message: 'Failed to get user images',
+          type: 'internal_error'
+        }
+      }, 500)
+    }
+  }
+)
 
 export default app

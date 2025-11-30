@@ -8,6 +8,9 @@ export interface CloudflareBindings {
   STORAGE_BUCKET: R2Bucket
   R2_BUCKET_NAME: string
   R2_CUSTOM_PUBLIC_URL: string
+  R2_ACCOUNT_ID: string
+  R2_ACCESS_KEY_ID: string
+  R2_SECRET_ACCESS_KEY: string
   
   // Google Cloud
   GOOGLE_CLOUD_PROJECT_ID: string

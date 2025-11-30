@@ -46,6 +46,7 @@ export class AsyncTaskDatabase {
       
       // Async-specific fields (if extending schema):
       taskId,
+      taskType: type === 'image' ? 'imageInference' : 'videoInference',
       taskStatus: 'pending',
       taskProgress: 0,
       isAsync: true,

@@ -1,7 +1,6 @@
 import { Context } from 'hono'
 import { CloudflareBindings, ContextVariables } from '../types/env'
-import { googleImageModels } from '../shared/imageModels/google'
-import { runwareImageModels } from '../shared/imageModels/runware'
+import { getModelService } from './modelService'
 import { selectProvider, RequestParams } from '../utils/providerSelector'
 import { getGeminiApiKey, getGoogleAccessToken, validateGoogleConfig } from './googleAuth'
 import { createStorageService } from '../lib/storage'
@@ -43,8 +42,10 @@ export async function generateImage(
 ): Promise<GenerationResult> {
   const startTime = Date.now()
   
-  // Get model configuration from Google and Runware models
-  const allImageModels = { ...googleImageModels, ...runwareImageModels }
+  // Get model configuration from database
+  const db = c.get('db')
+  const modelService = getModelService(db)
+  const allImageModels = await modelService.getActiveModelsAsObject('image')
   const modelConfig = allImageModels[params.model]
   if (!modelConfig) {
     throw new Error(`Model '${params.model}' not found`)
@@ -105,7 +106,9 @@ export async function generateImage(
   // Process through storage service if not a test model
   if (!params.model.includes('test')) {
     const storageService = createStorageService(
-      c.env.STORAGE_BUCKET,
+      c.env.R2_ACCOUNT_ID,
+      c.env.R2_ACCESS_KEY_ID,
+      c.env.R2_SECRET_ACCESS_KEY,
       c.env.R2_BUCKET_NAME,
       c.env.R2_CUSTOM_PUBLIC_URL
     )

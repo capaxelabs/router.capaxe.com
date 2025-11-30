@@ -181,14 +181,14 @@ storageService.downloadFromUrl(url: string): Promise<{ data: ArrayBuffer, conten
 
 **Image Generation:**
 ```
-POST /v1/openai/images/generations
+POST /v1/images/generations
   → Returns: {"task_id": "abc123"} (async) or direct result (sync)
   → Body: { model, prompt, size, quality, n, response_format, async }
 ```
 
 **Video Generation:**
 ```
-POST /v1/openai/videos/generations
+POST /v1/videos/generations
   → Returns: {"task_id": "xyz789"} (always async for videos)
   → Body: { model, prompt, duration, resolution, response_format }
 ```
@@ -300,7 +300,7 @@ See [TODO.md](TODO.md) for detailed migration progress.
 
 ### Async Task Processing
 
-1. Request comes to `/v1/openai/images/generations`
+1. Request comes to `/v1/images/generations`
 2. Route handler validates and creates task ID
 3. Task record inserted into `api_usage` table with `taskStatus: 'pending'`
 4. Queue message sent to `ASYNC_QUEUE`
@@ -319,12 +319,12 @@ See [TODO.md](TODO.md) for detailed migration progress.
 npm run dev
 
 # Test sync mode (immediate response)
-curl -X POST http://localhost:8787/v1/openai/images/generations \
+curl -X POST http://localhost:8787/v1/images/generations \
   -H "Authorization: Bearer your-api-key" \
   -d '{"model": "google/imagen-4", "prompt": "a cat", "async": false}'
 
 # Test async mode (queue processing)
-curl -X POST http://localhost:8787/v1/openai/images/generations \
+curl -X POST http://localhost:8787/v1/images/generations \
   -H "Authorization: Bearer your-api-key" \
   -d '{"model": "google/imagen-4", "prompt": "a cat"}'
 ```
@@ -451,6 +451,219 @@ Use `getGoogleAccessToken(serviceAccountKey)` for Vertex AI models.
 - Unlimited concurrent requests
 - Queue-based async processing prevents timeouts
 - R2 storage with CDN distribution
+
+## Known Issues & Resolutions
+
+### ✅ Resolved Issues
+
+#### Queue Consumer Model Cache Initialization (FIXED)
+
+**Problem:** Queue consumer was calling `generateImage()` and `generateVideo()` without initializing model cache, causing all async requests to fail with:
+```
+Error: Models cache not initialized. Call setModelsCache() first.
+```
+
+**Impact:** ALL async image/video generation requests (primary production use case) were broken.
+
+**Resolution:** Updated [src/services/queueConsumer.ts](src/services/queueConsumer.ts) to:
+1. Import `getModelService` and `setModelsCache`
+2. Create database connection once per task
+3. Load models from database using `getActiveModelsAsObject()`
+4. Initialize price calculator cache with `setModelsCache(models)`
+5. Pass database instance to generation functions
+
+**Code Pattern:**
+```typescript
+async function processImageTask(...) {
+  const { generateImage } = await import('./imageService')
+  const { getModelService } = await import('./modelService')
+  const { setModelsCache } = await import('../shared/priceCalculator')
+
+  // Create database connection
+  const db = createDatabase({
+    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
+    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
+  })
+
+  // Load models and initialize cache
+  const modelService = getModelService(db)
+  const models = await modelService.getActiveModelsAsObject('image')
+  setModelsCache(models)
+
+  // Create context with reused db instance
+  const mockContext = {
+    env,
+    req: { ... },
+    get: (key: string) => {
+      if (key === 'db') return db
+      return null
+    },
+    set: () => {}
+  } as any
+
+  // Now generateImage() works properly
+  const result = await generateImage(mockContext, request, userId)
+  return result
+}
+```
+
+**Status:** ✅ Fixed - Async processing now works for all models
+
+---
+
+### 🔴 Outstanding Critical Issues
+
+#### 1. Google Vertex AI Authentication Not Implemented
+
+**Location:** [src/services/googleAuth.ts](src/services/googleAuth.ts) (lines 60, 75)
+
+**Problem:**
+- JWT signing with RS256 is not implemented (placeholder at line 60)
+- OAuth2 token exchange returns `mock_access_token` (line 75)
+- Services use hardcoded mock tokens in [src/services/imageService.ts:254](src/services/imageService.ts#L254) and [src/services/videoService.ts:461](src/services/videoService.ts#L461)
+
+**Impact:**
+- Vertex AI models (Imagen 3/4 with `vertex` provider) will fail with 401 Unauthorized
+- Affects 6 Imagen models that require Vertex AI authentication
+
+**Required Implementation:**
+```typescript
+// Use Web Crypto API for RS256 signing
+export async function generateGoogleJWT(
+  serviceAccountEmail: string,
+  privateKey: string,
+  scope: string = 'https://www.googleapis.com/auth/cloud-platform'
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const payload = {
+    iss: serviceAccountEmail,
+    scope: scope,
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  }
+
+  // Import private key
+  const pemKey = privateKey
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\s/g, '')
+
+  const keyData = Uint8Array.from(atob(pemKey), c => c.charCodeAt(0))
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    keyData,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+
+  // Sign JWT
+  const encoder = new TextEncoder()
+  const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '')
+  const payloadB64 = btoa(JSON.stringify(payload)).replace(/=/g, '')
+  const data = `${headerB64}.${payloadB64}`
+
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    encoder.encode(data)
+  )
+
+  const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '')
+
+  return `${data}.${signatureB64}`
+}
+
+export async function getGoogleAccessToken(env: CloudflareBindings): Promise<GoogleAccessToken> {
+  const credentials = getGoogleServiceAccountCredentials(env)
+  const jwt = await generateGoogleJWT(credentials.client_email, credentials.private_key)
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to get access token: ${await response.text()}`)
+  }
+
+  return await response.json()
+}
+```
+
+**Also update in services:**
+```typescript
+// Replace mock tokens in imageService.ts and videoService.ts
+const { getGoogleAccessToken } = await import('./googleAuth')
+const tokenResponse = await getGoogleAccessToken(c.env)
+const accessToken = tokenResponse.access_token
+```
+
+**Priority:** High - Blocks 6 Imagen models from working
+
+---
+
+### ⚠️ Medium Priority Issues
+
+#### 2. Missing JWT Implementation for Admin Auth
+
+**Location:** [src/middleware/apiKeyMiddleware.ts:10](src/middleware/apiKeyMiddleware.ts#L10)
+
+**Problem:** JWT token verification commented out with TODO
+
+**Impact:** Admin authentication may not work properly if JWT tokens are used
+
+**Recommendation:** Implement using `@tsndr/cloudflare-worker-jwt` or Web Crypto API
+
+---
+
+#### 3. No Rate Limiting for Admin Operations
+
+**Location:** [src/middleware/adminAuth.ts:62](src/middleware/adminAuth.ts#L62)
+
+**Problem:** No rate limiting implemented for admin endpoints
+
+**Impact:** Admin endpoints vulnerable to abuse/DOS attacks
+
+**Recommendation:** Implement rate limiting using Cloudflare KV or Durable Objects
+
+---
+
+### 📊 Current Model Status
+
+| Category | Working | Broken | Total |
+|----------|---------|--------|-------|
+| **Image Models** | 11 | 6 | 17 |
+| **Video Models** | 3 | 0 | 3 |
+| **Total** | 14 | 6 | 20 |
+
+**Working Models:**
+- ✅ Google Gemini (3 image models) - Uses `gemini` provider with API key
+- ✅ Google Veo (3 video models) - Uses `gemini` provider with API key
+- ✅ Runware (5 image models) - Uses Runware REST API
+
+**Broken Models (Require Vertex AI Auth):**
+- ❌ Google Imagen 3/4 with `vertex` provider (6 models)
+
+---
+
+### 🔧 Fix Priority Checklist
+
+- [x] **Queue consumer model cache initialization** - ✅ FIXED
+- [ ] **Implement Google Vertex AI authentication** - 🔴 HIGH PRIORITY
+- [ ] **Replace mock tokens in image/video services** - 🔴 HIGH PRIORITY
+- [ ] **Implement JWT authentication** - ⚠️ MEDIUM PRIORITY
+- [ ] **Add admin rate limiting** - ⚠️ MEDIUM PRIORITY
+
+---
 
 ## Documentation
 

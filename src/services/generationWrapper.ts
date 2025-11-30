@@ -5,17 +5,8 @@ import { preLogUsage, refundUsage, postLogUsage, GenerationParams } from './usag
 import { generateImage, ImageGenerationParams } from './imageService'
 import { generateVideo, VideoGenerationParams } from './videoService'
 import { selectProvider } from '../utils/providerSelector'
-import { googleImageModels } from '../shared/imageModels/google'
-import { googleVideoModels } from '../shared/videoModels/google'
-import { runwareImageModels } from '../shared/imageModels/runware'
-import { runwareVideoModels } from '../shared/videoModels/runware'
-
-const models = {
-  ...googleImageModels,
-  ...googleVideoModels,
-  ...runwareImageModels,
-  ...runwareVideoModels
-}
+import { getModelService } from './modelService'
+import { setModelsCache } from '../shared/priceCalculator'
 
 interface GenerationResult {
   created: number
@@ -54,11 +45,17 @@ export function createImageGenerationHandler() {
       throw new Error('Authentication required')
     }
 
-    // Get model configuration and select provider
+    // Get model configuration from database and select provider
+    const db = c.get('db')
+    const modelService = getModelService(db)
+    const models = await modelService.getActiveModelsAsObject('image')
     const modelConfig = models[params.model]
     if (!modelConfig) {
       throw new Error(`Model '${params.model}' not found`)
     }
+
+    // Set models cache for price calculator
+    setModelsCache(models)
 
     const providerIndex = selectProvider(modelConfig.providers, params)
     let usageLogEntry
@@ -137,11 +134,17 @@ export function createVideoGenerationHandler() {
       throw new Error('Authentication required')
     }
 
-    // Get model configuration and select provider
+    // Get model configuration from database and select provider
+    const db = c.get('db')
+    const modelService = getModelService(db)
+    const models = await modelService.getActiveModelsAsObject('video')
     const modelConfig = models[params.model]
     if (!modelConfig) {
       throw new Error(`Model '${params.model}' not found`)
     }
+
+    // Set models cache for price calculator
+    setModelsCache(models)
 
     const providerIndex = selectProvider(modelConfig.providers, params)
     let usageLogEntry

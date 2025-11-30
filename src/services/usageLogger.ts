@@ -2,19 +2,8 @@ import { Context } from 'hono'
 import { eq } from 'drizzle-orm'
 import { Database, users, apiUsage } from '../db'
 import { CloudflareBindings, ContextVariables } from '../types/env'
-import { googleImageModels } from '../shared/imageModels/google'
-import { googleVideoModels } from '../shared/videoModels/google'
-import { runwareImageModels } from '../shared/imageModels/runware'
-import { runwareVideoModels } from '../shared/videoModels/runware'
 import { preCalcPrice, postCalcPrice, convertPriceToDbFormat } from '../shared/priceCalculator'
 import { AuthenticatedUser } from '../middleware/apiKeyMiddleware'
-
-const models: Record<string, any> = {
-  ...googleImageModels,
-  ...googleVideoModels,
-  ...runwareImageModels,
-  ...runwareVideoModels
-}
 
 export interface UsageLogEntry {
   id: string
@@ -47,10 +36,8 @@ export async function preLogUsage(
     throw new Error('Database not available')
   }
 
-  const modelConfig = models[params.model]
-  if (!modelConfig) {
-    throw new Error(`Model '${params.model}' not found`)
-  }
+  // Model validation is done by the caller (in generationWrapper or service layer)
+  // We just need the model name here for logging
 
   // Calculate pre-price (maximum estimated cost)
   const prePriceUsd = preCalcPrice(params.model, params.size, params.quality, providerIndex)

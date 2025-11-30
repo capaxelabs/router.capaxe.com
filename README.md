@@ -225,7 +225,7 @@ Once you add a model to the shared directory and export it from the index file, 
 - **Model Listing:** `GET /v1/models` and `GET /models/ui`
 - **Usage Logging:** Tracked in `api_usage` table
 - **Price Calculator:** Automatic cost calculation
-- **Generation Endpoints:** `POST /v1/openai/images/generations` or `/v1/openai/videos/generations`
+- **Generation Endpoints:** `POST /v1/images/generations` or `/v1/videos/generations`
 - **Provider Selection:** Automatic routing to the correct provider
 
 ## Available Endpoints

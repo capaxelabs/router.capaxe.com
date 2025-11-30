@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Playground - ImageRouter API</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .spinner {
+      border: 3px solid #e5e7eb;
+      border-top: 3px solid #8b5cf6;
+      border-radius: 50%;
+      width: 48px;
+      height: 48px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes gradient {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    .gradient-animate {
+      background: linear-gradient(270deg, #8b5cf6, #ec4899, #8b5cf6);
+      background-size: 400% 400%;
+      animation: gradient 3s ease infinite;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-purple-600 via-violet-600 to-purple-700 min-h-screen">
+  <div id="app"></div>
+
+  <script type="module">
+    // Import components from modular file
+    import { App, render, html } from '/js/admin-app.js';
+
+    // Render the app
+    render(html`<${App} />`, document.getElementById('app'));
+  </script>
+</body>
+</html>

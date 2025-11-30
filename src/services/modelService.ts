@@ -343,6 +343,28 @@ export class ModelService {
       examples: hydrated.examples,
     }
   }
+
+  /**
+   * Get all models as a plain object (backward compatibility with static imports)
+   * Returns: { 'google/gemini-2.5-flash': modelData, ... }
+   */
+  async getAllModelsAsObject(filters?: ModelFilters): Promise<Record<string, ModelData>> {
+    const modelsList = await this.listModels(filters)
+    const modelsObject: Record<string, ModelData> = {}
+    
+    for (const model of modelsList) {
+      modelsObject[model.id] = this.toModelData(model)
+    }
+    
+    return modelsObject
+  }
+
+  /**
+   * Get active models as a plain object (most common use case)
+   */
+  async getActiveModelsAsObject(type?: 'image' | 'video'): Promise<Record<string, ModelData>> {
+    return this.getAllModelsAsObject({ status: 'active', isPublic: true, type })
+  }
 }
 
 // ============================================================================

@@ -38,13 +38,88 @@ async function processQueueMessage(
   message: Message<QueueMessage>,
   env: CloudflareBindings
 ): Promise<void> {
-  const { taskId, type, userId, request } = message.body
+  const { taskId, type, userId } = message.body
 
   // Create database connection
   const db = createDatabase({
     TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
     TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
   })
+
+  // Fetch task data from database
+  const { apiUsage } = await import('../db/schema')
+  const { eq } = await import('drizzle-orm')
+  
+  const taskRecords = await db.select().from(apiUsage).where(eq(apiUsage.taskId, taskId)).limit(1)
+  if (!taskRecords || taskRecords.length === 0) {
+    throw new Error(`Task ${taskId} not found in database`)
+  }
+
+  const task = taskRecords[0]
+  console.log(`[Queue Consumer] Fetched task from database: model=${task.model}, prompt=${task.prompt?.substring(0, 50)}...`)
+
+  // Parse metadata to get input image URLs and other params
+  const metadata = task.metadata ? JSON.parse(task.metadata) : {}
+  const inputImageUrls = metadata.inputImageUrls || []
+  const originalRequest = metadata.originalRequest || {}
+
+  console.log(`[Queue Consumer] Task has ${inputImageUrls.length} input images`)
+
+  // Helper function to convert ArrayBuffer to base64 (handles large files)
+  function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer)
+    const chunkSize = 8192 // Process in chunks to avoid stack overflow
+    let binary = ''
+    
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.slice(i, i + chunkSize)
+      binary += String.fromCharCode(...chunk)
+    }
+    
+    return btoa(binary)
+  }
+
+  // Fetch input images from R2 if provided
+  let imagesData: Array<{ data: string; type: string; filename?: string }> = []
+  if (inputImageUrls.length > 0) {
+    console.log(`[Queue Consumer] Downloading ${inputImageUrls.length} source images from R2...`)
+    for (const url of inputImageUrls) {
+      try {
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch source image: ${response.status}`)
+        }
+        const arrayBuffer = await response.arrayBuffer()
+        console.log(`[Queue Consumer] Downloaded image ${url.split('/').pop()}: ${arrayBuffer.byteLength} bytes`)
+        
+        const base64 = arrayBufferToBase64(arrayBuffer)
+        const contentType = response.headers.get('content-type') || 'image/png'
+        
+        imagesData.push({
+          data: base64,
+          type: contentType,
+          filename: url.split('/').pop()
+        })
+        console.log(`[Queue Consumer] Converted to base64: ${base64.length} chars`)
+      } catch (error) {
+        console.error(`[Queue Consumer] Failed to download source image ${url}:`, error)
+        throw error
+      }
+    }
+    console.log(`[Queue Consumer] Downloaded ${imagesData.length} source images`)
+  }
+
+  // Build request object from database task
+  const request = {
+    model: task.model,
+    prompt: task.prompt,
+    size: task.imageSize,
+    quality: task.quality,
+    n: originalRequest.n || 1,
+    duration: originalRequest.duration,
+    resolution: originalRequest.resolution,
+    imagesData: imagesData.length > 0 ? imagesData : undefined
+  }
 
   // Create queue service for database updates
   const queueService = new QueueService(
@@ -65,9 +140,9 @@ async function processQueueMessage(
     const startTime = Date.now()
 
     if (type === 'image') {
-      result = await processImageTask(request, userId, env, queueService, taskId)
+      result = await processImageTask(request, task.userId, env, queueService, taskId)
     } else if (type === 'video') {
-      result = await processVideoTask(request, userId, env, queueService, taskId)
+      result = await processVideoTask(request, task.userId, env, queueService, taskId)
     } else if (type === 'video_poll') {
       result = await processVideoPollTask(message.body, env, queueService)
       return // Don't complete the task yet, just poll
@@ -145,8 +220,21 @@ async function processImageTask(
   queueService: QueueService,
   taskId: string
 ): Promise<any> {
-  // Import image service dynamically
+  // Import required services
   const { generateImage } = await import('./imageService')
+  const { getModelService } = await import('./modelService')
+  const { setModelsCache } = await import('../shared/priceCalculator')
+  
+  // Create database connection
+  const db = createDatabase({
+    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
+    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
+  })
+  
+  // Load models from database and initialize price calculator cache
+  const modelService = getModelService(db)
+  const models = await modelService.getActiveModelsAsObject('image')
+  setModelsCache(models)
   
   // Create mock context for the generation service
   const mockContext = {
@@ -161,12 +249,7 @@ async function processImageTask(
     },
     get: (key: string) => {
       // Provide necessary context variables
-      if (key === 'db') {
-        return createDatabase({
-          TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
-          TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
-        })
-      }
+      if (key === 'db') return db
       return null
     },
     set: () => {}
@@ -199,8 +282,21 @@ async function processVideoTask(
   queueService: QueueService,
   taskId: string
 ): Promise<any> {
-  // Import video service dynamically
-  const { generateVideoAsync } = await import('./videoService')
+  // Import required services
+  const { generateVideo } = await import('./videoService')
+  const { getModelService } = await import('./modelService')
+  const { setModelsCache } = await import('../shared/priceCalculator')
+  
+  // Create database connection
+  const db = createDatabase({
+    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
+    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
+  })
+  
+  // Load models from database and initialize price calculator cache
+  const modelService = getModelService(db)
+  const models = await modelService.getActiveModelsAsObject('video')
+  setModelsCache(models)
   
   // Create mock context for the generation service
   const mockContext = {
@@ -214,12 +310,7 @@ async function processVideoTask(
       }
     },
     get: (key: string) => {
-      if (key === 'db') {
-        return createDatabase({
-          TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
-          TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
-        })
-      }
+      if (key === 'db') return db
       return null
     },
     set: () => {}
@@ -232,7 +323,7 @@ async function processVideoTask(
   })
 
   // Run the actual video generation
-  const result = await generateVideoAsync(mockContext, request, userId)
+  const result = await generateVideo(mockContext, request, userId)
 
   // Update progress  
   await queueService.updateTaskProgress(taskId, {
@@ -379,15 +470,21 @@ async function pollGoogleOperation(
             let outputUrls: string[] = []
             if (videoResponse.ok) {
               console.log(`[Queue Video] Video download successful, preparing R2 upload...`)
-              console.log(`[Queue Video] Environment check - STORAGE_BUCKET: ${env.STORAGE_BUCKET ? 'available' : 'MISSING'}, R2_BUCKET_NAME: ${env.R2_BUCKET_NAME || 'MISSING'}, R2_CUSTOM_PUBLIC_URL: ${env.R2_CUSTOM_PUBLIC_URL || 'MISSING'}`)
+              console.log(`[Queue Video] Environment check - R2_ACCOUNT_ID: ${env.R2_ACCOUNT_ID || 'MISSING'}, R2_BUCKET_NAME: ${env.R2_BUCKET_NAME || 'MISSING'}, R2_CUSTOM_PUBLIC_URL: ${env.R2_CUSTOM_PUBLIC_URL || 'MISSING'}`)
               
               // Upload video to R2 instead of storing as base64
-              const { R2StorageService } = await import('../lib/storage')
-              const storageService = new R2StorageService(
-                env.STORAGE_BUCKET,
+              const { createStorageService } = await import('../lib/storage')
+              const storageService = createStorageService(
+                env.R2_ACCOUNT_ID,
+                env.R2_ACCESS_KEY_ID,
+                env.R2_SECRET_ACCESS_KEY,
                 env.R2_BUCKET_NAME,
                 env.R2_CUSTOM_PUBLIC_URL
               )
+              
+              if (!storageService) {
+                throw new Error('Storage service not configured - cannot upload video')
+              }
               
               console.log(`[Queue Video] Uploading video from ${videoData.videoUri}`)
               const videoBuffer = await videoResponse.arrayBuffer()

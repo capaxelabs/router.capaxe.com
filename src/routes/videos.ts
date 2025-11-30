@@ -5,8 +5,7 @@ import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
 import { VideoGenerationRequest, validateVideoRequest } from '../lib/validation'
 import { createQueueService } from '../services/queueService'
-import { googleVideoModels } from '../shared/videoModels/google'
-import { runwareVideoModels } from '../shared/videoModels/runware'
+import { getModelService } from '../services/modelService'
 
 const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
@@ -56,75 +55,10 @@ app.post('/generations',
         delete requestData.image
       }
       
-      // TEST MODE: Return mock response for development
-      if (validatedData.test === true) {
-        const { generateTaskId } = await import('../services/taskIdGenerator')
-        const taskId = generateTaskId('video', authenticatedUser!.id)
-        const estimatedTime = Date.now() + (validatedData.duration || 5) * 60 * 1000 // duration in minutes
-        
-        // Create a mock database entry for test mode (completed immediately)
-        try {
-          const db = c.get('db')
-          if (db) {
-            const { apiUsage } = await import('../db/schema')
-            const mockVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-            const now = new Date()
-            
-            await db.insert(apiUsage).values({
-              id: crypto.randomUUID(),
-              taskId: taskId,
-              userId: authenticatedUser!.id,
-              apiKeyId: authenticatedUser!.apiKeyId,
-              model: validatedData.model,
-              prompt: validatedData.prompt,
-              inputTokens: Math.floor(validatedData.prompt.length / 4), // Rough token estimate
-              outputTokens: 0,
-              totalTokens: Math.floor(validatedData.prompt.length / 4),
-              imageSize: validatedData.size,
-              imageCount: 1,
-              requestCost: 0.01, // Mock cost
-              cost: 0.0001, // Total cost in cents
-              speedMs: 100, // Mock speed value for test mode
-              status: 'completed', // Completed immediately for test mode
-              outputUrls: JSON.stringify([mockVideoUrl]), // Mock video URL
-              taskType: 'video',
-              taskStatus: 'completed', // Completed immediately
-              taskProgress: 100, // 100% complete
-              taskStartedAt: now,
-              taskCompletedAt: now,
-              isAsync: true,
-              provider: 'test', // Required field - set to 'test' for test mode
-              metadata: JSON.stringify({
-                test_mode: true,
-                model: validatedData.model,
-                duration: validatedData.duration,
-                aspect_ratio: validatedData.aspect_ratio,
-                resolution: validatedData.resolution,
-                provider: 'test'
-              }),
-              ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
-            })
-          }
-        } catch (dbError) {
-          console.warn('Failed to create test database entry:', dbError)
-        }
-        
-        return c.json({
-          taskId,
-          status: 'completed',
-          type: 'video',
-          createdAt: Date.now(),
-          message: 'Test video generation completed immediately. Use GET /v1/tasks/:taskId to retrieve results.',
-          result: {
-            created: Math.floor(Date.now() / 1000),
-            data: [{ url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4' }],
-            cost: 1
-          }
-        })
-      }
-
       // ASYNC MODE ONLY: Validate model exists before creating task
-      const allVideoModels = { ...googleVideoModels, ...runwareVideoModels }
+      const db = c.get('db')
+      const modelService = getModelService(db)
+      const allVideoModels = await modelService.getActiveModelsAsObject('video')
       
       if (!allVideoModels[validatedData.model]) {
         return c.json({
@@ -138,16 +72,33 @@ app.post('/generations',
       
       // Create task and return immediately
       try {
+          // Create storage service for uploading source images
+          const { createStorageService } = await import('../lib/storage')
+          const storageService = createStorageService(
+            c.env.R2_ACCOUNT_ID,
+            c.env.R2_ACCESS_KEY_ID,
+            c.env.R2_SECRET_ACCESS_KEY,
+            c.env.R2_BUCKET_NAME,
+            c.env.R2_CUSTOM_PUBLIC_URL
+          )
+
           const queueService = createQueueService(c)
-          const { taskId } = await queueService.createAsyncTask('video', authenticatedUser!.id, {
-            model: validatedData.model,
-            prompt: validatedData.prompt,
-            imageSize: validatedData.size,
-            quality: 'auto', // Videos don't have quality parameter typically
-            apiKeyId: authenticatedUser!.apiKeyId,
-            ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
-            ...requestData // Include all request data
-          })
+          const { taskId } = await queueService.createAsyncTask(
+            'video',
+            authenticatedUser!.id,
+            {
+              model: validatedData.model,
+              prompt: validatedData.prompt,
+              imageSize: validatedData.size,
+              quality: 'auto',
+              duration: validatedData.duration,
+              resolution: validatedData.resolution,
+              apiKeyId: authenticatedUser!.apiKeyId,
+              ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
+              imagesData: requestData.imagesData // Pass input images
+            },
+            storageService
+          )
 
           return c.json({
             taskId,
@@ -162,8 +113,8 @@ app.post('/generations',
         console.error('Failed to create async video task:', queueError)
         return c.json({
           error: {
-            message: 'Async processing not available. Please deploy to Cloudflare Workers to enable queue-based async processing.',
-            type: 'async_unavailable',
+            message: 'Failed to queue video generation task. The queue service is unavailable.',
+            type: 'queue_unavailable',
             details: (queueError as Error).message
           }
         }, 503)
@@ -265,5 +216,125 @@ app.get('/proxy', async (c) => {
     }, 500)
   }
 })
+
+/**
+ * GET /v1/videos/user/list
+ * Get user's generated videos with pagination and filtering
+ */
+app.get('/user/list',
+  ipLimiter,
+  validateApiKey,
+  async (c) => {
+    try {
+      const authenticatedUser = c.get('authenticatedUser')
+      if (!authenticatedUser) {
+        return c.json({
+          error: {
+            message: 'Authentication required',
+            type: 'unauthorized'
+          }
+        }, 401)
+      }
+
+      // Parse query parameters
+      const limit = Math.min(Number(c.req.query('limit')) || 20, 100) // Max 100 items
+      const offset = Number(c.req.query('offset')) || 0
+      const status = c.req.query('status') as 'completed' | 'failed' | 'pending' | 'processing' | undefined
+      const model = c.req.query('model') // Optional model filter
+
+      // Validate status parameter
+      if (status && !['completed', 'failed', 'pending', 'processing'].includes(status)) {
+        return c.json({
+          error: {
+            message: 'Invalid status parameter. Must be one of: completed, failed, pending, processing',
+            type: 'invalid_request'
+          }
+        }, 400)
+      }
+
+      const db = c.get('db')
+      const { apiUsage } = await import('../db/schema')
+      const { eq, and, desc, like } = await import('drizzle-orm')
+
+      // Build query conditions - filter for videos only (taskId starts with 'vid_')
+      const conditions = [
+        eq(apiUsage.userId, authenticatedUser.id),
+        like(apiUsage.taskId, 'vid_%')
+      ]
+
+      if (status) {
+        conditions.push(eq(apiUsage.taskStatus, status))
+      }
+
+      if (model) {
+        conditions.push(eq(apiUsage.model, model))
+      }
+
+      // Fetch videos with pagination
+      const videos = await db
+        .select({
+          id: apiUsage.id,
+          taskId: apiUsage.taskId,
+          model: apiUsage.model,
+          provider: apiUsage.provider,
+          prompt: apiUsage.prompt,
+          outputUrls: apiUsage.outputUrls,
+          cost: apiUsage.cost,
+          status: apiUsage.status,
+          taskStatus: apiUsage.taskStatus,
+          taskProgress: apiUsage.taskProgress,
+          error: apiUsage.error,
+          createdAt: apiUsage.createdAt,
+          taskCompletedAt: apiUsage.taskCompletedAt,
+          speedMs: apiUsage.speedMs
+        })
+        .from(apiUsage)
+        .where(and(...conditions))
+        .orderBy(desc(apiUsage.createdAt))
+        .limit(limit)
+        .offset(offset)
+
+      // Parse outputUrls from JSON strings and format response
+      const formattedVideos = videos.map((vid: any) => ({
+        id: vid.id,
+        taskId: vid.taskId,
+        model: vid.model,
+        provider: vid.provider,
+        prompt: vid.prompt,
+        videos: vid.outputUrls ? JSON.parse(vid.outputUrls) : [],
+        cost: vid.cost / 10000, // Convert to USD
+        status: vid.status,
+        taskStatus: vid.taskStatus,
+        taskProgress: vid.taskProgress,
+        error: vid.error,
+        createdAt: vid.createdAt.getTime(),
+        completedAt: vid.taskCompletedAt?.getTime() || null,
+        durationMs: vid.speedMs || null
+      }))
+
+      // Check if there are more results for pagination
+      const hasMore = videos.length === limit
+
+      return c.json({
+        success: true,
+        data: formattedVideos,
+        pagination: {
+          limit,
+          offset,
+          count: videos.length,
+          hasMore
+        }
+      })
+    } catch (error) {
+      console.error('Failed to list user videos:', error)
+      return c.json({
+        error: {
+          message: 'Failed to fetch videos',
+          type: 'internal_error'
+        }
+      }, 500)
+    }
+  }
+)
 
 export default app
