@@ -1,0 +1,151 @@
+meta {
+  name: Video - Generate
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{BASE_URL}}/v1/videos/generations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{api_key}}
+}
+
+body:json {
+  {
+    "model": "google/veo-2",
+    "prompt": "A time-lapse of clouds moving over a mountain range at golden hour",
+    "duration": 5,
+    "aspect_ratio": "16:9",
+    "resolution": "1080p"
+  }
+}
+
+docs {
+  # Video Generation API
+
+  Generate videos using Google Veo 2 and Veo 3 models.
+
+  ## Endpoint
+  `POST /v1/videos/generations`
+
+  ## Authentication
+  Required. Use Bearer token authentication with your API key.
+
+  ## Request Body
+
+  ### Required Parameters
+  - `model` (string) - Model ID to use:
+    - `google/veo-2` - Veo 2 (5-8 second videos)
+    - `google/veo-3` - Veo 3 (up to 10 seconds, advanced features)
+  - `prompt` (string) - Text description of the video (max 4000 characters)
+
+  ### Optional Parameters
+  - `duration` (integer) - Video duration in seconds (1-10). Default: 5
+  - `aspect_ratio` (string) - Video aspect ratio: "16:9" or "9:16". Default: "16:9"
+  - `resolution` (string) - Video resolution: "720p" or "1080p". Default: "1080p"
+  - `fps` (integer) - Frames per second (12-60). Default: 24
+  - `person_generation` (string) - Person generation policy:
+    - "allow_all" (default) - Allow all person generation
+    - "allow_adult" - Only allow adult person generation
+    - "dont_allow" - Don't generate people
+  - `seed` (integer) - Random seed for reproducibility
+  - `negative_prompt` (string) - What to avoid in the generation
+  - `image` (object | array) - Reference image(s) for image-to-video:
+    - Single image: `{"data": "base64...", "type": "image/png"}`
+    - Multiple images: Array of image objects
+  - `response_format` (string) - "url" (default) or "b64_json"
+
+  ## Response
+
+  Returns a task ID for async processing (video generation takes 5+ minutes):
+  ```json
+  {
+    "taskId": "xyz789",
+    "status": "pending",
+    "type": "video",
+    "createdAt": 1234567890,
+    "message": "Video generation task created. Use GET /v1/tasks/:taskId to check status."
+  }
+  ```
+
+  Poll the task status using `GET /v1/tasks/{taskId}` until complete.
+
+  ## Model Comparison
+
+  | Feature | Veo 2 | Veo 3 |
+  |---------|-------|-------|
+  | Max Duration | 8 seconds | 10 seconds |
+  | Quality | High | Ultra High |
+  | Speed | ~5 min | ~8 min |
+  | Advanced Features | ❌ | ✅ (better physics, lighting) |
+
+  ## Examples
+
+  ### Basic Text-to-Video
+  ```json
+  {
+    "model": "google/veo-2",
+    "prompt": "A cat playing with yarn in slow motion",
+    "duration": 5,
+    "aspect_ratio": "16:9",
+    "resolution": "1080p"
+  }
+  ```
+
+  ### Image-to-Video
+  ```json
+  {
+    "model": "google/veo-3",
+    "prompt": "Animate this image with flowing water and moving clouds",
+    "image": {
+      "data": "base64_encoded_image",
+      "type": "image/png"
+    },
+    "duration": 8,
+    "aspect_ratio": "16:9"
+  }
+  ```
+
+  ### Advanced Settings
+  ```json
+  {
+    "model": "google/veo-3",
+    "prompt": "Cinematic shot of a spaceship landing on an alien planet",
+    "duration": 10,
+    "aspect_ratio": "16:9",
+    "resolution": "1080p",
+    "fps": 30,
+    "person_generation": "dont_allow",
+    "negative_prompt": "blurry, low quality, distorted",
+    "seed": 12345
+  }
+  ```
+
+  ## Processing Time
+  - Veo 2: ~5-6 minutes per video
+  - Veo 3: ~8-10 minutes per video
+  - All video requests are async-only due to long processing times
+
+  ## Error Responses
+
+  ### 400 Bad Request
+  - Invalid model ID
+  - Invalid duration (must be 1-10 seconds)
+  - Invalid aspect ratio
+  - Invalid resolution
+
+  ### 401 Unauthorized
+  - Missing or invalid API key
+
+  ### 402 Payment Required
+  - Insufficient credits
+
+  ## Pricing
+  - Veo 2: ~$0.10 per second
+  - Veo 3: ~$0.15 per second
+  - Calculated based on actual video duration generated
+}

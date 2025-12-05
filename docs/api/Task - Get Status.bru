@@ -1,0 +1,157 @@
+meta {
+  name: Task - Get Status
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{BASE_URL}}/v1/tasks/{{task_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{api_key}}
+}
+
+docs {
+  # Task Status API
+
+  Check the status of async image or video generation tasks.
+
+  ## Endpoint
+  `GET /v1/tasks/{taskId}`
+
+  ## Authentication
+  Required. Use Bearer token authentication with your API key.
+
+  ## URL Parameters
+  - `taskId` (string) - The task ID returned from image/video generation endpoint
+
+  ## Response
+
+  ### Pending Task
+  ```json
+  {
+    "taskId": "abc123",
+    "status": "pending",
+    "type": "image",
+    "progress": 0,
+    "createdAt": 1234567890,
+    "message": "Task is queued for processing"
+  }
+  ```
+
+  ### Processing Task
+  ```json
+  {
+    "taskId": "abc123",
+    "status": "processing",
+    "type": "image",
+    "progress": 50,
+    "createdAt": 1234567890,
+    "startedAt": 1234567895,
+    "message": "Generating image..."
+  }
+  ```
+
+  ### Completed Task
+  ```json
+  {
+    "taskId": "abc123",
+    "status": "completed",
+    "type": "image",
+    "progress": 100,
+    "createdAt": 1234567890,
+    "startedAt": 1234567895,
+    "completedAt": 1234567920,
+    "result": {
+      "data": [
+        {
+          "url": "https://storage.example.com/images/2025/12/02/image1.png",
+          "revisedPrompt": "Enhanced version of: A serene landscape..."
+        }
+      ]
+    }
+  }
+  ```
+
+  ### Failed Task
+  ```json
+  {
+    "taskId": "abc123",
+    "status": "failed",
+    "type": "image",
+    "progress": 0,
+    "createdAt": 1234567890,
+    "startedAt": 1234567895,
+    "completedAt": 1234567900,
+    "error": {
+      "message": "Unsupported MIME type: image/avif",
+      "type": "INVALID_ARGUMENT"
+    }
+  }
+  ```
+
+  ## Task Statuses
+  - `pending` - Task is queued, waiting to be processed
+  - `processing` - Task is currently being processed
+  - `completed` - Task finished successfully, result available
+  - `failed` - Task failed, error message available
+
+  ## Polling Best Practices
+
+  ### Recommended Polling Strategy
+  1. Wait 2 seconds before first poll
+  2. Poll every 2-3 seconds for images
+  3. Poll every 5-10 seconds for videos
+  4. Stop polling after task reaches `completed` or `failed` status
+  5. Set a maximum timeout (e.g., 2 minutes for images, 15 minutes for videos)
+
+  ### Example Polling Code (JavaScript)
+  ```javascript
+  async function pollTask(taskId, apiKey) {
+    const maxAttempts = 60;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      const response = await fetch(`/v1/tasks/${taskId}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+
+      const data = await response.json();
+
+      if (data.status === 'completed') {
+        return data.result;
+      } else if (data.status === 'failed') {
+        throw new Error(data.error.message);
+      }
+
+      // Wait 2 seconds before next poll
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      attempts++;
+    }
+
+    throw new Error('Polling timeout');
+  }
+  ```
+
+  ## Expected Processing Times
+  - **Images**: 10-30 seconds (Google Gemini/Imagen)
+  - **Images**: 5-15 seconds (Runware models)
+  - **Videos**: 5-10 minutes (depending on duration and model)
+
+  ## Error Responses
+
+  ### 404 Not Found
+  - Task ID doesn't exist or has expired
+
+  ### 401 Unauthorized
+  - Missing or invalid API key
+  - Task belongs to different user
+
+  ## Task Expiration
+  - Completed tasks are retained for 24 hours
+  - After 24 hours, task data may be deleted
+  - Failed tasks are retained for 7 days for debugging
+}

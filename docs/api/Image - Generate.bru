@@ -1,0 +1,153 @@
+meta {
+  name: Image - Generate
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{BASE_URL}}/v1/images/generations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{api_key}}
+}
+
+body:json {
+  {
+    "model": "google/gemini-2.5-flash-image",
+    "prompt": "A serene Japanese garden with cherry blossoms, koi pond, and stone bridge at sunset",
+    "size": "16:9",
+    "quality": "high",
+    "n": 1
+  }
+}
+
+docs {
+  # Image Generation API
+
+  Generate images using various AI models including Google Gemini, Google Imagen, and Runware models.
+
+  ## Endpoint
+  `POST /v1/images/generations`
+
+  ## Authentication
+  Required. Use Bearer token authentication with your API key.
+
+  ## Request Body
+
+  ### Required Parameters
+  - `model` (string) - Model ID to use (e.g., "google/gemini-2.5-flash-image", "runware/flux-pro-v1.1")
+  - `prompt` (string) - Text description of the image to generate (max 4000 characters)
+
+  ### Optional Parameters
+  - `size` (string) - Image size/aspect ratio. Can be:
+    - Pixel dimensions: "1024x1024", "1792x1024", etc.
+    - Aspect ratios: "16:9", "1:1", "9:16", etc. (automatically converted to pixel dimensions)
+    - Default: "auto"
+  - `quality` (string) - Image quality: "auto", "low", "medium", "high". Default: "auto"
+  - `n` (integer) - Number of images to generate (1-16). Default: 1
+  - `image` (object | array) - Reference image(s) for image-to-image generation:
+    - Single image: `{"data": "base64...", "type": "image/png", "filename": "input.png"}`
+    - Multiple images: Array of image objects (max varies by model)
+  - `response_format` (string) - "url" (default) or "b64_json"
+
+  ### Supported Image Formats
+  - JPEG (image/jpeg, image/jpg)
+  - PNG (image/png)
+  - GIF (image/gif)
+  - WebP (image/webp)
+  - BMP (image/bmp)
+  - TIFF (image/tiff)
+  - ❌ AVIF not supported
+
+  ## Response
+
+  Returns a task ID for async processing:
+  ```json
+  {
+    "taskId": "abc123",
+    "status": "pending",
+    "type": "image",
+    "createdAt": 1234567890,
+    "message": "Image generation task created. Use GET /v1/tasks/:taskId to check status."
+  }
+  ```
+
+  Poll the task status using `GET /v1/tasks/{taskId}` until complete.
+
+  ## Model-Specific Features
+
+  ### Google Gemini Models
+  - `google/gemini-2.5-flash-image` - Fast model, max 3 reference images
+  - `google/gemini-3-pro-image-preview` - Advanced model, max 14 reference images, supports Google Search grounding
+
+  ### Google Imagen Models
+  - `google/imagen-3`, `google/imagen-3-fast`
+  - `google/imagen-4`, `google/imagen-4-fast`
+
+  ### Runware Models
+  - `runware/flux-pro-v1.1` - FLUX Pro model
+  - `runware/bytedance-seedream-v5` - ByteDance Seedream
+  - `runware/photomaker` - Subject personalization (requires 1-4 reference images, trigger word "rwre")
+
+  ## Examples
+
+  ### Text-to-Image
+  ```json
+  {
+    "model": "google/gemini-2.5-flash-image",
+    "prompt": "A cyberpunk city at night with neon lights",
+    "size": "16:9",
+    "quality": "high",
+    "n": 1
+  }
+  ```
+
+  ### Image-to-Image (Single Reference)
+  ```json
+  {
+    "model": "google/gemini-2.5-flash-image",
+    "prompt": "Transform this into a watercolor painting",
+    "image": {
+      "data": "base64_encoded_image_data",
+      "type": "image/png",
+      "filename": "reference.png"
+    },
+    "size": "1:1"
+  }
+  ```
+
+  ### Image-to-Image (Multiple References)
+  ```json
+  {
+    "model": "runware/photomaker",
+    "prompt": "rwre wearing a professional suit, studio lighting",
+    "image": [
+      {"data": "base64_1", "type": "image/jpeg"},
+      {"data": "base64_2", "type": "image/jpeg"},
+      {"data": "base64_3", "type": "image/jpeg"}
+    ],
+    "size": "1024x1024"
+  }
+  ```
+
+  ## Error Responses
+
+  ### 400 Bad Request
+  - Invalid model ID
+  - Unsupported image format (e.g., AVIF)
+  - Invalid aspect ratio
+  - Too many reference images for model
+
+  ### 401 Unauthorized
+  - Missing or invalid API key
+
+  ### 402 Payment Required
+  - Insufficient credits
+
+  ## Rate Limits
+  - Varies by plan
+  - Check response headers for rate limit info
+}

@@ -3,9 +3,10 @@ import { z } from 'zod'
 // Quality enum validation
 export const QualitySchema = z.enum(['auto', 'low', 'medium', 'high'])
 
-// Size validation (e.g., "1024x1024" or "auto")
+// Size validation (e.g., "1024x1024", "auto", or aspect ratio "16:9")
 export const SizeSchema = z.union([
   z.string().regex(/^\d+x\d+$/, 'Size must be in format WIDTHxHEIGHT (e.g., 1024x1024)'),
+  z.string().regex(/^\d+:\d+$/, 'Aspect ratio must be in format WIDTH:HEIGHT (e.g., 16:9)'),
   z.literal('auto')
 ])
 
@@ -21,10 +22,24 @@ export const BaseImageRequestSchema = z.object({
   user: z.string().optional()
 })
 
-// Base64 image data schema
+// Supported image MIME types
+const SUPPORTED_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heif',
+  'image/heic',
+] as const
+
+// Base64 image data schema with MIME type validation
 const Base64ImageSchema = z.object({
   data: z.string().min(1, 'Base64 image data required'),
-  type: z.string().optional(), // MIME type, e.g., 'image/png'
+  type: z.enum(SUPPORTED_IMAGE_TYPES as any, {
+    errorMap: () => ({
+      message: `Unsupported image type. Supported formats: JPEG, PNG, WebP, HEIF, HEIC.`
+    })
+  }).optional(),
   filename: z.string().optional()
 })
 
@@ -126,6 +141,61 @@ export type ImageGenerationResponse = z.infer<typeof ImageGenerationResponseSche
 export type VideoGenerationResponse = z.infer<typeof VideoGenerationResponseSchema>
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>
 export type Quality = z.infer<typeof QualitySchema>
+
+// Aspect ratio to pixel dimensions converter
+export function convertAspectRatioToSize(aspectRatio: string, defaultResolution: number = 1024): string {
+  // If it's already in pixel format, return as-is
+  if (/^\d+x\d+$/.test(aspectRatio)) {
+    return aspectRatio
+  }
+
+  // If it's "auto", return as-is
+  if (aspectRatio === 'auto') {
+    return aspectRatio
+  }
+
+  // Parse aspect ratio (e.g., "16:9")
+  const match = aspectRatio.match(/^(\d+):(\d+)$/)
+  if (!match) {
+    return aspectRatio // Return original if not recognized
+  }
+
+  const [, widthRatio, heightRatio] = match
+  const width = parseInt(widthRatio)
+  const height = parseInt(heightRatio)
+
+  // Common aspect ratio mappings to standard resolutions
+  const aspectRatioMap: Record<string, string> = {
+    '1:1': '1024x1024',
+    '16:9': '1792x1024',
+    '9:16': '1024x1792',
+    '4:3': '1024x768',
+    '3:4': '768x1024',
+    '21:9': '2048x896',
+    '3:2': '1536x1024',
+    '2:3': '1024x1536',
+    '4:5': '1024x1280',
+    '5:4': '1280x1024'
+  }
+
+  // Check if we have a predefined mapping
+  if (aspectRatioMap[aspectRatio]) {
+    return aspectRatioMap[aspectRatio]
+  }
+
+  // Calculate dimensions while maintaining aspect ratio
+  // Use defaultResolution as the longer side
+  if (width > height) {
+    const calculatedHeight = Math.round((defaultResolution * height) / width)
+    // Round to nearest 64 (many models require dimensions divisible by 64)
+    const roundedHeight = Math.round(calculatedHeight / 64) * 64
+    return `${defaultResolution}x${roundedHeight}`
+  } else {
+    const calculatedWidth = Math.round((defaultResolution * width) / height)
+    const roundedWidth = Math.round(calculatedWidth / 64) * 64
+    return `${roundedWidth}x${defaultResolution}`
+  }
+}
 
 // Validation helper functions
 export function validateImageRequest(data: unknown): ImageGenerationRequest {

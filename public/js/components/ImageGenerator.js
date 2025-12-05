@@ -1,4 +1,4 @@
-import { useState } from 'https://esm.sh/preact@10.19.3/hooks';
+import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
 import { html } from './shared.js';
 
 export const ImageGenerator = () => {
@@ -11,7 +11,7 @@ export const ImageGenerator = () => {
     apiKey: localStorage.getItem('apiKey') || '',
     async: true
   });
-  
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -19,6 +19,45 @@ export const ImageGenerator = () => {
   const [polling, setPolling] = useState(false);
   const [inputImages, setInputImages] = useState([]);
   const [inputImagePreviews, setInputImagePreviews] = useState([]);
+
+  // Models from database
+  const [models, setModels] = useState({});
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [selectedModelCapabilities, setSelectedModelCapabilities] = useState(null);
+
+  // Fetch models from database on mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const res = await fetch('/v1/models?type=image');
+        if (!res.ok) throw new Error('Failed to fetch models');
+        const data = await res.json();
+
+        // Filter out inactive/deprecated models
+        const activeModels = Object.entries(data).reduce((acc, [id, model]) => {
+          if (model.status !== 'inactive' && model.status !== 'deprecated') {
+            acc[id] = model;
+          }
+          return acc;
+        }, {});
+
+        setModels(activeModels);
+        setModelsLoading(false);
+      } catch (err) {
+        console.error('Error fetching models:', err);
+        setModelsLoading(false);
+      }
+    };
+    fetchModels();
+  }, []);
+
+  // Update selected model capabilities when model changes
+  useEffect(() => {
+    if (models[formData.model]) {
+      const capabilities = models[formData.model].capabilities;
+      setSelectedModelCapabilities(capabilities);
+    }
+  }, [formData.model, models]);
 
   const updateForm = (key, value) => {
     setFormData({ ...formData, [key]: value });
@@ -28,7 +67,26 @@ export const ImageGenerator = () => {
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
-    
+
+    // Supported image types
+    const supportedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff'];
+
+    // Check for unsupported file types
+    const unsupportedFiles = files.filter(file => !supportedTypes.includes(file.type));
+    if (unsupportedFiles.length > 0) {
+      alert(`Unsupported image format detected!\n\nFile: ${unsupportedFiles[0].name}\nType: ${unsupportedFiles[0].type}\n\nSupported formats: JPEG, PNG, GIF, WebP, BMP, TIFF\n\nNote: AVIF format is not supported.`);
+      e.target.value = '';
+      return;
+    }
+
+    // Check if adding these files would exceed the limit
+    const maxImages = selectedModelCapabilities?.maxInputImages;
+    if (maxImages && (inputImages.length + files.length) > maxImages) {
+      alert(`This model supports a maximum of ${maxImages} images. You currently have ${inputImages.length} and are trying to add ${files.length} more.`);
+      e.target.value = '';
+      return;
+    }
+
     for (const file of files) {
       // Show preview
       const reader = new FileReader();
@@ -36,7 +94,7 @@ export const ImageGenerator = () => {
         setInputImagePreviews(prev => [...prev, e.target.result]);
       };
       reader.readAsDataURL(file);
-      
+
       // Convert to base64 for API
       const base64Reader = new FileReader();
       base64Reader.onload = (e) => {
@@ -49,7 +107,7 @@ export const ImageGenerator = () => {
       };
       base64Reader.readAsDataURL(file);
     }
-    
+
     // Reset input so same files can be added again
     e.target.value = '';
   };
@@ -184,44 +242,57 @@ export const ImageGenerator = () => {
               <label class="block text-xs font-semibold text-gray-600 mb-2 uppercase">
                 Model
               </label>
-              <select
-                value=${formData.model}
-                onChange=${(e) => updateForm('model', e.target.value)}
-                class="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:border-purple-500 outline-none transition"
-              >
-                <optgroup label="Google Gemini">
-                  <option value="google/gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
-                  <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                </optgroup>
-                <optgroup label="Google Imagen">
-                  <option value="google/imagen-3">Imagen 3</option>
-                  <option value="google/imagen-3-fast">Imagen 3 Fast</option>
-                  <option value="google/imagen-4">Imagen 4</option>
-                  <option value="google/imagen-4-fast">Imagen 4 Fast</option>
-                </optgroup>
-                <optgroup label="Runware">
-                  <option value="runware/flux-pro">Flux Pro</option>
-                  <option value="runware/realistic-vision">Realistic Vision</option>
-                </optgroup>
-              </select>
+              ${modelsLoading ? html`
+                <div class="w-full px-3 py-2 text-sm text-gray-400">Loading models...</div>
+              ` : html`
+                <select
+                  value=${formData.model}
+                  onChange=${(e) => updateForm('model', e.target.value)}
+                  class="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:border-purple-500 outline-none transition"
+                >
+                  ${Object.entries(
+                    Object.values(models).reduce((groups, model) => {
+                      // Group by category or provider
+                      const group = model.category || 'Other';
+                      if (!groups[group]) groups[group] = [];
+                      groups[group].push(model);
+                      return groups;
+                    }, {})
+                  ).map(([category, categoryModels]) => html`
+                    <optgroup label=${category}>
+                      ${categoryModels.map(model => html`
+                        <option value=${model.id}>${model.name}</option>
+                      `)}
+                    </optgroup>
+                  `)}
+                </select>
+              `}
             </div>
             
             <!-- Size and Quality -->
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-xs font-semibold text-gray-600 mb-2 uppercase">
-                  Size
+                  Size / Aspect Ratio
                 </label>
                 <select
                   value=${formData.size}
                   onChange=${(e) => updateForm('size', e.target.value)}
                   class="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:border-purple-500 outline-none transition"
                 >
-                  <option value="256x256">256×256</option>
-                  <option value="512x512">512×512</option>
-                  <option value="1024x1024">1024×1024</option>
-                  <option value="1792x1024">1792×1024</option>
-                  <option value="1024x1792">1024×1792</option>
+                  ${selectedModelCapabilities?.aspectRatios ?
+                    selectedModelCapabilities.aspectRatios.map(ratio => {
+                      const label = ratio.replace(':', '×');
+                      return html`<option value=${ratio}>${label}</option>`;
+                    }) :
+                    html`
+                      <option value="256x256">256×256</option>
+                      <option value="512x512">512×512</option>
+                      <option value="1024x1024">1024×1024</option>
+                      <option value="1792x1024">1792×1024</option>
+                      <option value="1024x1792">1024×1792</option>
+                    `
+                  }
                 </select>
               </div>
               
@@ -274,11 +345,33 @@ export const ImageGenerator = () => {
               />
             </div>
             
+            <!-- Model Capabilities Info -->
+            ${selectedModelCapabilities && html`
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs">
+                <div class="font-semibold text-blue-800 mb-2">Model Info</div>
+                ${selectedModelCapabilities.maxInputImages && html`
+                  <div class="text-blue-700 mb-1">
+                    📷 Reference Images: ${selectedModelCapabilities.minInputImages || 0} - ${selectedModelCapabilities.maxInputImages}
+                  </div>
+                `}
+                ${selectedModelCapabilities.aspectRatios && html`
+                  <div class="text-blue-700">
+                    📐 Aspect Ratios: ${selectedModelCapabilities.aspectRatios.join(', ')}
+                  </div>
+                `}
+              </div>
+            `}
+
             <!-- Input Images (Optional) -->
             <div>
               <div class="flex items-center justify-between mb-2">
                 <label class="block text-xs font-semibold text-gray-600 uppercase">
                   Input Images (Optional)
+                  ${selectedModelCapabilities?.maxInputImages && html`
+                    <span class="text-xs text-gray-500 font-normal ml-1">
+                      (Max: ${selectedModelCapabilities.maxInputImages})
+                    </span>
+                  `}
                 </label>
                 ${inputImages.length > 0 && html`
                   <button
@@ -290,6 +383,19 @@ export const ImageGenerator = () => {
                   </button>
                 `}
               </div>
+
+              <!-- Validation Warning -->
+              ${selectedModelCapabilities?.maxInputImages && inputImages.length > selectedModelCapabilities.maxInputImages && html`
+                <div class="bg-red-50 border border-red-200 rounded-lg p-2 mb-2 text-xs text-red-700">
+                  ⚠️ Too many images! This model supports max ${selectedModelCapabilities.maxInputImages} images. Please remove ${inputImages.length - selectedModelCapabilities.maxInputImages}.
+                </div>
+              `}
+
+              ${selectedModelCapabilities?.minInputImages && inputImages.length > 0 && inputImages.length < selectedModelCapabilities.minInputImages && html`
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-2 mb-2 text-xs text-yellow-700">
+                  ⚠️ At least ${selectedModelCapabilities.minInputImages} images required for this model.
+                </div>
+              `}
               
               ${inputImagePreviews.length > 0 && html`
                 <div class="grid grid-cols-2 gap-2 mb-2">
@@ -319,9 +425,10 @@ export const ImageGenerator = () => {
                 <span class="text-2xl mb-1">📷</span>
                 <span class="text-xs text-gray-600">Click to add image(s)</span>
                 <span class="text-xs text-gray-400 mt-1">Multiple images supported</span>
+                <span class="text-xs text-gray-400 block mt-1">JPEG, PNG, GIF, WebP, BMP, TIFF</span>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/bmp,image/tiff"
                   multiple
                   onChange=${handleImageUpload}
                   class="hidden"
@@ -332,7 +439,9 @@ export const ImageGenerator = () => {
             <!-- Submit Button -->
             <button
               type="submit"
-              disabled=${loading}
+              disabled=${loading ||
+                (selectedModelCapabilities?.maxInputImages && inputImages.length > selectedModelCapabilities.maxInputImages) ||
+                (selectedModelCapabilities?.minInputImages && inputImages.length > 0 && inputImages.length < selectedModelCapabilities.minInputImages)}
               class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-purple-700 hover:to-pink-700 transition transform hover:scale-[1.02] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none shadow-lg text-sm"
             >
               ${loading ? '⏳ Generating...' : '🎨 Generate Images'}

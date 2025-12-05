@@ -10,7 +10,10 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-models": "tsx src/db/seeds/migrateModelsToDb.ts",
-    "db:verify-models": "tsx src/db/seeds/verifyModels.ts"
+    "db:verify-models": "tsx src/db/seeds/verifyModels.ts",
+    "db:seed-gemini": "tsx drizzle/seed-gemini-image-models.ts",
+    "db:seed-new-models": "tsx drizzle/seed-new-image-models.ts",
+    "db:seed-photomaker": "tsx drizzle/seed-photomaker.ts"
   },
   "dependencies": {
     "@google/genai": "^1.20.0",
@@ -18,6 +21,7 @@
     "@libsql/client": "^0.14.0",
     "@runware/sdk-js": "^1.1.47",
     "cuid": "^3.0.0",
+    "dotenv": "^17.2.3",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.9.8",
     "zod": "^3.23.8"

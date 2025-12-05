@@ -3,7 +3,7 @@ import { validator } from 'hono/validator'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { ipLimiter } from '../middleware/rateLimiting'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
-import { ImageGenerationRequest, validateImageRequest } from '../lib/validation'
+import { ImageGenerationRequest, validateImageRequest, convertAspectRatioToSize } from '../lib/validation'
 import type { NewApiUsage } from '../db/schema'
 import { createQueueService } from '../services/queueService'
 import { getModelService } from '../services/modelService'
@@ -44,10 +44,15 @@ app.post('/generations',
       const validatedData = c.req.valid('json') as ImageGenerationRequest
       const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
-      
+
       // Create request with potential file data or base64 data
       const requestData: any = { ...validatedData }
-      
+
+      // Convert aspect ratio to pixel dimensions if needed
+      if (requestData.size && typeof requestData.size === 'string') {
+        requestData.size = convertAspectRatioToSize(requestData.size)
+      }
+
       // Convert structured base64 image data to imagesData format
       if (validatedData.image) {
         if (typeof validatedData.image === 'object' && !Array.isArray(validatedData.image) && 'data' in validatedData.image) {
@@ -99,7 +104,7 @@ app.post('/generations',
           {
             model: validatedData.model,
             prompt: validatedData.prompt,
-            imageSize: validatedData.size,
+            imageSize: requestData.size, // Use converted size (aspect ratio → pixels)
             quality: validatedData.quality,
             n: validatedData.n,
             apiKeyId: authenticatedUser!.apiKeyId,

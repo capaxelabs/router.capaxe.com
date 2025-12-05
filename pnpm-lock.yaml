@@ -23,6 +23,9 @@ importers:
       cuid:
         specifier: ^3.0.0
         version: 3.0.0
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
       drizzle-orm:
         specifier: ^0.36.4
         version: 0.36.4(@libsql/client@0.14.0(bufferutil@4.0.9))
@@ -815,6 +818,10 @@ packages:
   detect-libc@2.1.0:
     resolution: {integrity: sha512-vEtk+OcP7VBRtQZ1EJ3bdgzSfBjgnEalLTp5zjJrS+2Z1w2KZly4SBdac/WDU3hhsNAZ9E8SC96ME4Ey8MZ7cg==}
     engines: {node: '>=8'}
+
+  dotenv@17.2.3:
+    resolution: {integrity: sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==}
+    engines: {node: '>=12'}
 
   drizzle-kit@0.28.1:
     resolution: {integrity: sha512-JimOV+ystXTWMgZkLHYHf2w3oS28hxiH1FR0dkmJLc7GHzdGJoJAQtQS5DRppnabsRZwE2U1F6CuezVBgmsBBQ==}
@@ -1680,6 +1687,8 @@ snapshots:
   detect-libc@2.0.2: {}
 
   detect-libc@2.1.0: {}
+
+  dotenv@17.2.3: {}
 
   drizzle-kit@0.28.1:
     dependencies:

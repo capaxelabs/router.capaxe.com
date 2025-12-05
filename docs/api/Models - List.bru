@@ -1,0 +1,151 @@
+meta {
+  name: Models - List
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{BASE_URL}}/v1/models?type=image
+  body: none
+  auth: none
+}
+
+docs {
+  # List Models API
+
+  Get a list of all available models for image or video generation.
+
+  ## Endpoint
+  `GET /v1/models`
+
+  ## Authentication
+  Optional. Public endpoint (no API key required).
+
+  ## Query Parameters
+  - `type` (string, optional) - Filter by model type:
+    - `image` - Only image generation models
+    - `video` - Only video generation models
+    - Omit to get all models
+  - `status` (string, optional) - Filter by status:
+    - `active` - Only active models (default)
+    - `beta` - Beta/preview models
+    - `deprecated` - Deprecated models
+  - `provider` (string, optional) - Filter by provider:
+    - `google` - Google models (Gemini, Imagen, Veo)
+    - `runware` - Runware models
+
+  ## Response
+
+  Returns an object keyed by model ID:
+  ```json
+  {
+    "google/gemini-2.5-flash-image": {
+      "id": "google/gemini-2.5-flash-image",
+      "name": "Gemini 2.5 Flash Image",
+      "type": "image",
+      "status": "active",
+      "category": "text-to-image",
+      "description": "Fast and efficient image generation...",
+      "providers": [
+        {
+          "id": "gemini",
+          "model_name": "gemini-2.5-flash-image",
+          "pricing": {
+            "type": "fixed",
+            "value": 0.02
+          }
+        }
+      ],
+      "capabilities": {
+        "supportsImage": true,
+        "maxInputImages": 3,
+        "aspectRatios": ["1:1", "16:9", "9:16", ...],
+        "maxResolution": "1024x1024"
+      },
+      "tags": ["fast", "multimodal", "gemini"],
+      "arenaScore": null,
+      "releaseDate": "2025-01-15"
+    },
+    "google/veo-2": {
+      "id": "google/veo-2",
+      "name": "Veo 2",
+      "type": "video",
+      ...
+    }
+  }
+  ```
+
+  ## Model Object Fields
+
+  ### Core Fields
+  - `id` - Unique model identifier
+  - `name` - Human-readable model name
+  - `type` - Model type ("image" or "video")
+  - `status` - Model status ("active", "beta", "deprecated")
+  - `category` - Model category (e.g., "text-to-image", "video-generation")
+  - `description` - Detailed model description
+
+  ### Provider Configuration
+  - `providers` - Array of provider configurations
+    - `id` - Provider ID ("gemini", "runware", etc.)
+    - `model_name` - Actual model name used by provider API
+    - `pricing` - Pricing information
+      - `type` - "fixed", "calculated", or "post_generation"
+      - `value` - Price per generation (in USD)
+
+  ### Capabilities
+  - `supportsImage` - Accepts reference images
+  - `maxInputImages` - Maximum reference images allowed
+  - `minInputImages` - Minimum reference images required
+  - `aspectRatios` - Supported aspect ratios
+  - `maxResolution` - Maximum output resolution
+  - `supportsTextToImage` - Supports text-only generation
+  - `supportsImageToImage` - Supports image-to-image
+  - Model-specific capabilities (e.g., `supportsGoogleSearch` for Gemini 3 Pro)
+
+  ### Metadata
+  - `tags` - Array of tags for categorization
+  - `arenaScore` - LLM Arena score (if applicable)
+  - `releaseDate` - Model release date
+  - `examples` - Array of example use cases
+
+  ## Examples
+
+  ### Get All Image Models
+  ```bash
+  GET /v1/models?type=image
+  ```
+
+  ### Get All Video Models
+  ```bash
+  GET /v1/models?type=video
+  ```
+
+  ### Get Active Models Only
+  ```bash
+  GET /v1/models?status=active
+  ```
+
+  ### Get Google Models
+  ```bash
+  GET /v1/models?provider=google
+  ```
+
+  ## Use Cases
+
+  ### Display Available Models in UI
+  Use this endpoint to dynamically populate model dropdowns in your application.
+
+  ### Check Model Capabilities
+  Check what features a model supports before making a generation request:
+  - Max reference images
+  - Supported aspect ratios
+  - Pricing information
+
+  ### Model Discovery
+  Discover new models as they're added to the platform without updating your code.
+
+  ## Response Codes
+  - `200 OK` - Successfully returned models list
+  - `400 Bad Request` - Invalid query parameters
+}
