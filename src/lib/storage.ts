@@ -32,7 +32,7 @@ export class R2StorageService {
 
   isEnabled(): boolean {
     return !!(this.credentials.accountId && this.credentials.accessKeyId &&
-              this.credentials.secretAccessKey && this.credentials.bucketName)
+      this.credentials.secretAccessKey && this.credentials.bucketName)
   }
 
   generateFileName(contentType: string, type: 'image' | 'video' = 'image'): string {
@@ -40,11 +40,11 @@ export class R2StorageService {
     const year = now.getFullYear()
     const month = String(now.getMonth() + 1).padStart(2, '0')
     const day = String(now.getDate()).padStart(2, '0')
-    
+
     const dateFolder = `${year}/${month}/${day}`
     const uniqueId = cuid()
     const extension = this.getExtensionFromContentType(contentType)
-    
+
     return `${type}s/${dateFolder}/${uniqueId}${extension}`
   }
 
@@ -186,7 +186,7 @@ export class R2StorageService {
   async downloadAndUpload(url: string, contentType: string, type: 'image' | 'video' = 'image', needBuffer = false): Promise<R2UploadResult> {
     console.log(`[R2 Download] Starting download from: ${url}`)
     console.log(`[R2 Download] Storage enabled: ${this.isEnabled()}, bucketName: ${this.credentials.bucketName}, publicUrl: ${this.credentials.publicUrl}`)
-    
+
     if (!this.isEnabled()) {
       console.error('[R2 Download] ERROR: Storage service is not configured')
       throw new Error('Storage service is not configured')
@@ -222,71 +222,15 @@ export class R2StorageService {
   }
 
   /**
-   * Upload source/input image to R2 (for queue optimization)
-   * Stores in source/YYYY/MM/DD/[cuid].ext
+   * NOTE: uploadSourceImage() has been removed
+   * Source images are now uploaded by the client (shootflo) before calling ImageRouter
+   * This service only handles output/result image processing
    */
-  async uploadSourceImage(base64Data: string, contentType: string): Promise<string> {
-    console.log(`[R2 Source] Uploading source image - contentType: ${contentType}`)
-    
-    if (!this.isEnabled()) {
-      throw new Error('Storage service is not configured')
-    }
-
-    try {
-      const base64Content = base64Data.replace(/^data:[^;]+;base64,/, '')
-      const binaryData = atob(base64Content)
-      const bytes = new Uint8Array(binaryData.length)
-      for (let i = 0; i < binaryData.length; i++) {
-        bytes[i] = binaryData.charCodeAt(i)
-      }
-
-      const now = new Date()
-      const year = now.getFullYear()
-      const month = String(now.getMonth() + 1).padStart(2, '0')
-      const day = String(now.getDate()).padStart(2, '0')
-      const extension = this.getExtensionFromContentType(contentType).replace('.', '')
-      const fileName = `source/${year}/${month}/${day}/${cuid()}.${extension}`
-
-      // Upload to R2
-      const bodyBuffer = bytes.buffer
-      const payloadHash = await this.sha256(bodyBuffer)
-      const date = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '')
-      const amzDate = date
-
-      const signature = await this.generateSignature('PUT', fileName, contentType, amzDate, payloadHash)
-      const dateStamp = date.substring(0, 8)
-      const credentialScope = `${dateStamp}/auto/s3/aws4_request`
-      const authorization = `AWS4-HMAC-SHA256 Credential=${this.credentials.accessKeyId}/${credentialScope}, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`
-
-      const uploadUrl = `https://${this.credentials.accountId}.r2.cloudflarestorage.com/${this.credentials.bucketName}/${fileName}`
-      const response = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': contentType,
-          'x-amz-content-sha256': payloadHash,
-          'x-amz-date': amzDate,
-          'Authorization': authorization
-        },
-        body: bodyBuffer
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to upload source image: ${response.status}`)
-      }
-
-      const publicUrl = `${this.credentials.publicUrl}/${fileName}`
-      console.log(`[R2 Source] Successfully uploaded: ${publicUrl}`)
-      return publicUrl
-    } catch (error) {
-      console.error('[R2 Source] Upload error:', error)
-      throw error
-    }
-  }
 
   async uploadBase64(base64Data: string, contentType: string, type: 'image' | 'video' = 'image'): Promise<R2UploadResult> {
     console.log(`[R2 Base64] Starting base64 upload - type: ${type}, contentType: ${contentType}`)
     console.log(`[R2 Base64] Storage enabled: ${this.isEnabled()}`)
-    
+
     if (!this.isEnabled()) {
       console.error('[R2 Base64] ERROR: Storage service is not configured')
       throw new Error('Storage service is not configured')
@@ -295,12 +239,12 @@ export class R2StorageService {
     try {
       const base64Content = base64Data.replace(/^data:[^;]+;base64,/, '')
       console.log(`[R2 Base64] Base64 content length: ${base64Content.length} chars`)
-      
+
       if (!base64Content) {
         console.error('[R2 Base64] ERROR: Invalid base64 data - empty content')
         throw new Error('Invalid base64 data: empty content')
       }
-      
+
       // Convert base64 to ArrayBuffer for R2
       console.log('[R2 Base64] Converting base64 to ArrayBuffer...')
       const binaryString = atob(base64Content)
@@ -310,7 +254,7 @@ export class R2StorageService {
         view[i] = binaryString.charCodeAt(i)
       }
       console.log(`[R2 Base64] ArrayBuffer created: ${buffer.byteLength} bytes`)
-      
+
       return await this._uploadBody(buffer, contentType, type)
     } catch (error) {
       console.error('[R2 Base64] ERROR:', error)
@@ -321,7 +265,7 @@ export class R2StorageService {
   async processContent(content: any, responseFormat = 'url', type: 'image' | 'video' = 'image'): Promise<any> {
     console.log(`[R2 Process] Processing content - type: ${type}, responseFormat: ${responseFormat}`)
     console.log(`[R2 Process] Content has URL: ${!!content.url}, has b64_json: ${!!content.b64_json}`)
-    
+
     if (!this.isEnabled()) {
       console.warn('[R2 Process] Storage not enabled, returning content as-is')
       return content
@@ -340,7 +284,7 @@ export class R2StorageService {
         console.log(`[R2 Process] Detected content type from URL: ${contentType}`)
         const needBuffer = responseFormat === 'b64_json'
         uploadResult = await this.downloadAndUpload(content.url, contentType, type, needBuffer)
-      } else if (content.b64_json) {  
+      } else if (content.b64_json) {
         const contentType = this.detectContentTypeFromBase64(content.b64_json)
         console.log(`[R2 Process] Detected content type from base64: ${contentType}`)
         uploadResult = await this.uploadBase64(content.b64_json, contentType, type)
@@ -383,20 +327,20 @@ export class R2StorageService {
 
   detectContentType(url: string): string {
     const urlLower = url.toLowerCase()
-    
+
     // Video formats
     if (urlLower.includes('.mp4')) return 'video/mp4'
     if (urlLower.includes('.webm')) return 'video/webm'
     if (urlLower.includes('.mov') || urlLower.includes('.quicktime')) return 'video/quicktime'
     if (urlLower.includes('.avi')) return 'video/avi'
-    
+
     // Image formats
     if (urlLower.includes('.png')) return 'image/png'
     if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) return 'image/jpeg'
     if (urlLower.includes('.webp')) return 'image/webp'
     if (urlLower.includes('.gif')) return 'image/gif'
     if (urlLower.includes('.svg')) return 'image/svg+xml'
-    
+
     // Fallback based on context
     if (urlLower.includes('video')) return 'video/mp4'
     return 'image/png'
@@ -407,13 +351,13 @@ export class R2StorageService {
       const match = base64Data.match(/^data:([^;]+);base64,/)
       if (match) return match[1]
     }
-    
+
     const header = base64Data.substring(0, 20)
     if (header.startsWith('/9j/')) return 'image/jpeg'
     if (header.startsWith('iVBOR')) return 'image/png'
     if (header.startsWith('UklGR')) return 'image/webp'
     if (header.startsWith('R0lGOD')) return 'image/gif'
-    
+
     return 'image/jpeg'
   }
 
@@ -515,11 +459,11 @@ export class R2StorageService {
     const timestamp = Date.now()
     const randomSuffix = Math.random().toString(36).substring(2, 8)
     const cleanFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_')
-    
+
     if (userId) {
       return `users/${userId}/${timestamp}_${randomSuffix}_${cleanFilename}`
     }
-    
+
     return `temp/${timestamp}_${randomSuffix}_${cleanFilename}`
   }
 }
@@ -538,7 +482,7 @@ export function createStorageService(
   console.log(`  - secretAccessKey: ${secretAccessKey ? 'provided' : 'EMPTY'}`)
   console.log(`  - bucketName: ${bucketName || 'EMPTY'}`)
   console.log(`  - publicUrl: ${publicUrl || 'EMPTY'}`)
-  
+
   if (!accountId || !accessKeyId || !secretAccessKey || !bucketName || !publicUrl) {
     console.warn('[createStorageService] WARNING: Missing required R2 credentials. Storage service will be disabled.')
     console.warn(`  Missing: ${!accountId ? 'accountId ' : ''}${!accessKeyId ? 'accessKeyId ' : ''}${!secretAccessKey ? 'secretAccessKey ' : ''}${!bucketName ? 'bucketName ' : ''}${!publicUrl ? 'publicUrl' : ''}`)

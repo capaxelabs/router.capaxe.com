@@ -15,7 +15,7 @@ export interface QueueMessage {
   request: any
   timestamp: number
   usageId: string // Links to api_usage record
-  
+
   // For video polling continuation (generic for any provider)
   pollingData?: {
     provider: 'google' | 'replicate' | 'runpod' | 'fal' | 'luma' | string
@@ -35,7 +35,7 @@ export class QueueService {
   constructor(
     private queue: Queue,
     private db: Database
-  ) {}
+  ) { }
 
   /**
    * Create an async task and queue it for processing
@@ -50,31 +50,20 @@ export class QueueService {
       quality?: string
       apiKeyId?: string
       ip?: string
-      imagesData?: Array<{ data: string; type: string; filename?: string }>
+      imageUrls?: string[]  // Changed from imagesData to imageUrls
       [key: string]: any
     },
-    storageService?: any // R2StorageService instance
+    storageService?: any // R2StorageService instance (still needed for output processing)
   ): Promise<{ taskId: string; usageId: string }> {
     const taskId = generateTaskId(type, userId)
     const usageId = `usage_${taskId}`
 
-    // Upload input images to R2 if provided (to avoid queue size limit)
-    let inputImageUrls: string[] = []
-    if (request.imagesData && request.imagesData.length > 0 && storageService) {
-      console.log(`[QueueService] Uploading ${request.imagesData.length} source images to R2...`)
-      for (const imageData of request.imagesData) {
-        try {
-          const url = await storageService.uploadSourceImage(
-            imageData.data,
-            imageData.type || 'image/png'
-          )
-          inputImageUrls.push(url)
-        } catch (error) {
-          console.error('[QueueService] Failed to upload source image:', error)
-          throw new Error(`Failed to upload source image: ${error instanceof Error ? error.message : 'Unknown error'}`)
-        }
-      }
-      console.log(`[QueueService] Uploaded source images: ${inputImageUrls.length}`)
+    // Input images are now already uploaded to R2 by the client (shootflo)
+    // We just store the URLs directly
+    const inputImageUrls = request.imageUrls || []
+
+    if (inputImageUrls.length > 0) {
+      console.log(`[QueueService] Task created with ${inputImageUrls.length} reference image URLs`)
     }
 
     // Store metadata including input image URLs
@@ -105,7 +94,7 @@ export class QueueService {
       apiKeyId: request.apiKeyId,
       ip: request.ip,
       metadata: JSON.stringify(metadata), // Store input image URLs and other metadata
-      
+
       // Async-specific fields
       taskId,
       taskType: type === 'image' ? 'imageInference' : 'videoInference',
@@ -230,7 +219,7 @@ export class QueueService {
     if (!record) return null
 
     const outputUrls = record.outputUrls ? JSON.parse(record.outputUrls) : []
-    
+
     const response: TaskStatusResponse = {
       taskId: record.taskId!,
       type: record.taskId!.startsWith('img_') ? 'image' : 'video',
@@ -238,7 +227,7 @@ export class QueueService {
       progress: record.taskProgress || 0,
       createdAt: record.createdAt.getTime(),
       updatedAt: record.createdAt.getTime(), // No updatedAt field in schema
-      
+
       // Request details
       model: record.model,
       prompt: record.prompt,
@@ -324,17 +313,17 @@ export class QueueService {
     const now = Date.now()
     const started = record.taskStartedAt ? record.taskStartedAt.getTime() : record.createdAt.getTime()
     const elapsed = now - started
-    
+
     // Typical generation times
     const isImage = record.taskId?.startsWith('img_')
     const estimatedTotal = isImage ? 15000 : 60000 // 15s for images, 60s for videos
-    
+
     const progress = record.taskProgress || 0
     if (progress > 0) {
       const estimatedRemaining = (elapsed / progress) * (100 - progress)
       return Math.max(0, Math.min(estimatedRemaining, estimatedTotal - elapsed))
     }
-    
+
     return Math.max(0, estimatedTotal - elapsed)
   }
 }
@@ -351,23 +340,23 @@ export interface TaskStatusResponse {
   updatedAt: number
   startedAt?: number
   completedAt?: number
-  
+
   // Request details
   model: string
   prompt: string
   imageSize: string
   quality?: string
-  
+
   // Results (only if completed)
   result?: {
     created: number
     data: Array<{ url: string }>
     cost: number
   }
-  
+
   // Error (only if failed)
   error?: string
-  
+
   // Time estimation
   estimatedTimeRemaining?: number
 }
@@ -379,7 +368,7 @@ export function createQueueService(
   c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>
 ): QueueService {
   const db = c.get('db') as Database
-  
+
   if (!db) {
     throw new Error('Database not available - ensure database connection is configured')
   }

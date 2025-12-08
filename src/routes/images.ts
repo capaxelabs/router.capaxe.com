@@ -20,23 +20,23 @@ const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables
  * POST /v1/images/generations
  * Generate images using Google models with usage logging
  */
-app.post('/generations', 
+app.post('/generations',
   ipLimiter,
   validateApiKey,
   async (c, next) => {
     const jsonBody = await c.req.json()
     c.set('processedRequestData', jsonBody)
-    
+
     await next()
   },
   validator('json', (value, c) => {
     // If we have processed form data with base64, use that instead
     const processedRequestData = c.get('processedRequestData')
-    
+
     if (processedRequestData) {
       return validateImageRequest(processedRequestData)
     }
-    
+
     return validateImageRequest(value)
   }),
   async (c) => {
@@ -45,7 +45,7 @@ app.post('/generations',
       const parsedFiles = c.get('parsedFiles')
       const authenticatedUser = c.get('authenticatedUser')
 
-      // Create request with potential file data or base64 data
+      // Create request with potential file data or URL arrays
       const requestData: any = { ...validatedData }
 
       // Convert aspect ratio to pixel dimensions if needed
@@ -53,19 +53,20 @@ app.post('/generations',
         requestData.size = convertAspectRatioToSize(requestData.size)
       }
 
-      // Convert structured base64 image data to imagesData format
+      // Handle image URLs (client sends URLs, not base64)
+      let imageUrls: string[] = []
       if (validatedData.image) {
-        if (typeof validatedData.image === 'object' && !Array.isArray(validatedData.image) && 'data' in validatedData.image) {
-          // Single structured base64 image
-          requestData.imagesData = [validatedData.image]
-        } else if (Array.isArray(validatedData.image) && validatedData.image[0] && typeof validatedData.image[0] === 'object' && 'data' in validatedData.image[0]) {
-          // Multiple structured base64 images
-          requestData.imagesData = validatedData.image
+        if (typeof validatedData.image === 'string') {
+          // Single URL
+          imageUrls = [validatedData.image]
+        } else if (Array.isArray(validatedData.image)) {
+          // Array of URLs
+          imageUrls = validatedData.image.filter(img => typeof img === 'string')
         }
-        // Remove the raw image field to avoid confusion
+        // Remove the raw image field
         delete requestData.image
       }
-      
+
       if (parsedFiles) {
         requestData.files = parsedFiles
       }
@@ -74,7 +75,7 @@ app.post('/generations',
       const db = c.get('db')
       const modelService = getModelService(db)
       const allImageModels = await modelService.getActiveModelsAsObject('image')
-      
+
       if (!allImageModels[validatedData.model]) {
         return c.json({
           error: {
@@ -84,10 +85,10 @@ app.post('/generations',
           }
         }, 400)
       }
-      
+
       // Create task and return immediately
       try {
-        // Create storage service for uploading source images
+        // Create storage service for processing output images
         const { createStorageService } = await import('../lib/storage')
         const storageService = createStorageService(
           c.env.R2_ACCOUNT_ID,
@@ -109,9 +110,9 @@ app.post('/generations',
             n: validatedData.n,
             apiKeyId: authenticatedUser!.apiKeyId,
             ip: c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown',
-            imagesData: requestData.imagesData // Pass input images
+            imageUrls: imageUrls.length > 0 ? imageUrls : undefined // Pass image URLs
           },
-          storageService // Pass storage service for uploading source images
+          storageService // Pass storage service for output processing only
         )
 
         return c.json({
@@ -124,14 +125,14 @@ app.post('/generations',
 
       } catch (queueError) {
         console.error('Failed to create async task:', queueError)
-        
+
         // Log the error to database if possible
         try {
           const db = c.get('db')
           if (db) {
             const { generateTaskId } = await import('../services/taskIdGenerator')
             const { apiUsage } = await import('../db/schema')
-            
+
             const taskId = generateTaskId('image', authenticatedUser!.id)
             const errorUsage: NewApiUsage = {
               id: `usage_${taskId}`,
@@ -153,14 +154,14 @@ app.post('/generations',
               taskProgress: 0,
               isAsync: true,
             }
-            
+
             await db.insert(apiUsage).values(errorUsage)
             console.log(`Logged async error for task ${taskId}`)
           }
         } catch (dbError) {
           console.error('Failed to log async error to database:', dbError)
         }
-        
+
         return c.json({
           error: {
             message: 'Failed to queue image generation task. The queue service is unavailable.',
@@ -213,7 +214,7 @@ app.post('/edits',
   },
   validator('json', (_, c) => {
     const parsedFields = c.get('parsedFields')
-    
+
     return validateImageRequest(parsedFields)
   }),
   async (c) => {
@@ -224,7 +225,7 @@ app.post('/edits',
 
       // Create request with potential file data or base64 data
       const requestWithImages: any = { ...validatedData }
-      
+
       // Convert structured base64 image data to imagesData format
       if (validatedData.image) {
         if (typeof validatedData.image === 'object' && !Array.isArray(validatedData.image) && 'data' in validatedData.image) {
