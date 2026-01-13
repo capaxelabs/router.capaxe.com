@@ -195,13 +195,13 @@ This document tracks the migration to Hono/Cloudflare Workers, focusing exclusiv
 - [ ] Integration tests for all endpoints
 - [ ] Performance testing (cache effectiveness)
 
-### 5.7 Admin Interface (Optional)
-- [ ] Create `POST /admin/models` - Add new model
-- [ ] Create `PATCH /admin/models/:id` - Update model
-- [ ] Create `PUT /admin/models/:id/status` - Change status
-- [ ] Create `DELETE /admin/models/:id` - Soft delete
-- [ ] Add bulk import/export endpoints
-- [ ] Create simple web UI for model management
+### 5.7 Admin Interface ✅ COMPLETED
+- [x] Create `POST /admin/models` - Add new model
+- [x] Create `PATCH /admin/models/:id` - Update model
+- [x] Create `PUT /admin/models/:id/status` - Change status
+- [x] Create `DELETE /admin/models/:id` - Soft delete
+- [x] Add bulk import/export endpoints (`POST /admin/models/bulk`)
+- [x] Create simple web UI for model management (`public/admin.html`)
 
 ### 5.8 Documentation & Cleanup
 - [ ] Update API documentation with model management
@@ -316,3 +316,41 @@ https://81cac75fe318d80f4344481afc4799ac.r2.cloudflarestorage.com/images/2025/09
 **New Addition**: **Phase 5** introduces database-driven model management, eliminating the need for code deployments when adding/updating models. See [docs/MODEL_DATABASE_PROPOSAL.md](docs/MODEL_DATABASE_PROPOSAL.md) for full design details.
 
 **Scope Note**: This migration focuses exclusively on **Google** and **Runware** providers. All other providers (Bytedance, OpenAI, Stability AI, Black Forest Labs, etc.) are out of scope for this implementation.
+
+---
+
+## 🔧 Bug Fixes Applied (January 2026)
+
+The following critical issues have been identified and fixed:
+
+### Critical Fixes ✅ COMPLETED
+- [x] **Google Vertex AI RS256 JWT Authentication** - Implemented proper OAuth2 service account authentication using Web Crypto API for Cloudflare Workers compatibility
+- [x] **Mock Access Tokens Replaced** - Fixed imageService.ts and videoService.ts to use real OAuth2 tokens instead of `mock_access_token`
+- [x] **JWT Token Validation** - Implemented full HMAC-SHA256 JWT validation in apiKeyMiddleware.ts (was disabled/always returning null)
+- [x] **Singleton Pattern Fixes** - Removed dangerous singleton patterns in modelService.ts and runwareService.ts (serverless anti-pattern)
+- [x] **Database Connection Optimization** - Fixed redundant database connections in queueConsumer.ts (was creating 3+ connections per task)
+- [x] **Task Speed Calculation Bug** - Fixed `speedMs: Date.now() - new Date().getTime()` which always returned ~0-1ms
+- [x] **QueueService Null Queue** - Refactored to make queue optional with proper validation
+- [x] **Admin Rate Limiting** - Implemented proper rate limiting middleware (60 req/min per IP)
+- [x] **Unused Provider Code Removed** - Cleaned up polling code for Replicate, Runpod, Fal, Luma (out of scope)
+- [x] **Runware testTask Bug** - Fixed hardcoded test parameters in model search (was ignoring user input)
+
+### Files Modified
+- `src/services/googleAuth.ts` - Full RS256 JWT + OAuth2 implementation
+- `src/services/imageService.ts` - Real Vertex AI authentication
+- `src/services/videoService.ts` - Real Vertex AI authentication
+- `src/middleware/apiKeyMiddleware.ts` - JWT validation + token generation
+- `src/middleware/adminAuth.ts` - Rate limiting implementation
+- `src/services/modelService.ts` - Factory pattern (removed singleton)
+- `src/services/runwareService.ts` - Factory pattern + fixed testTask bug
+- `src/services/queueService.ts` - Optional queue parameter
+- `src/services/queueConsumer.ts` - Single DB connection, fixed speed calc, removed unused providers
+
+### Model Status After Fixes
+| Category | Working | Notes |
+|----------|---------|-------|
+| Gemini Image Models | 3 | Via GEMINI_API_KEY |
+| Imagen Models | 10 | Requires GOOGLE_SERVICE_ACCOUNT_KEY (Vertex AI) |
+| Veo Video Models | 3 | Via GEMINI_API_KEY |
+| Runware Models | 5 | Via RUNWARE_API_KEY |
+| **Total** | **21** | All models should now work with proper credentials |

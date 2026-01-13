@@ -32,10 +32,13 @@ export interface QueueMessage {
  * Queue Service for handling async task management
  */
 export class QueueService {
-  constructor(
-    private queue: Queue,
-    private db: Database
-  ) { }
+  private queue: Queue | null
+  private db: Database
+
+  constructor(db: Database, queue?: Queue | null) {
+    this.db = db
+    this.queue = queue || null
+  }
 
   /**
    * Create an async task and queue it for processing
@@ -115,6 +118,9 @@ export class QueueService {
       usageId
     }
 
+    if (!this.queue) {
+      throw new Error('Queue not available - QueueService was initialized without a queue')
+    }
     await this.queue.send(queueMessage)
 
     console.log(`[QueueService] Created task ${taskId}, uploaded ${inputImageUrls.length} source images, queued for processing`)

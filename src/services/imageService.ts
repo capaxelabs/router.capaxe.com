@@ -248,14 +248,14 @@ async function generateVertex(
   userId: string
 ): Promise<GenerationResult> {
   validateGoogleConfig(c.env)
-  
+
   const projectId = c.env.GOOGLE_CLOUD_PROJECT_ID
   const location = c.env.GOOGLE_CLOUD_LOCATION || 'us-central1'
-  
-  // Get access token (simplified - in production implement proper OAuth2)
-  console.warn('Using mock access token - implement proper Vertex AI authentication')
-  const accessToken = 'mock_access_token'
-  
+
+  // Get access token using proper OAuth2 service account authentication
+  const tokenResponse = await getGoogleAccessToken(c.env)
+  const accessToken = tokenResponse.access_token
+
   const providerUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:predict`
 
   const requestBody = {

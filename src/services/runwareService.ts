@@ -524,23 +524,8 @@ export class RunwareService {
 
     console.log('[Runware Model Search] Request task:', JSON.stringify(task, null, 2))
 
-
-    const testTask = {
-        "taskType": "modelSearch",
-        "taskUUID": taskUUID,
-        "search": "realistic",
-        "tags": "photorealistic",
-        "category": "checkpoint",
-        "type": "base",
-        "architecture": "sdxl",
-        "visibility": "public",
-        "offset": 0,
-        "limit": 20
-      }
-    
-
     try {
-      const result = await this.makeRequest([testTask])
+      const result = await this.makeRequest([task])
 
       if (!result.data || result.data.length === 0) {
         console.log('[Runware Model Search] No results returned')
@@ -582,19 +567,10 @@ export function createRunwareService(apiKey: string, config?: Partial<RunwareCon
 }
 
 /**
- * Singleton instance for Cloudflare Workers
- * Reuses instance across requests (no connection needed with REST API)
- */
-let runwareInstance: RunwareService | null = null
-
-/**
- * Get or create Runware service instance
- * Singleton pattern for Cloudflare Workers environment
+ * Get Runware service instance
+ * Creates a new instance per request for worker safety.
+ * Since it's a stateless REST API client, this is lightweight.
  */
 export function getRunwareService(apiKey: string, config?: Partial<RunwareConfig>): RunwareService {
-  if (!runwareInstance) {
-    console.log('[Runware Service] Creating new REST API service instance')
-    runwareInstance = createRunwareService(apiKey, config)
-  }
-  return runwareInstance
+  return createRunwareService(apiKey, config)
 }

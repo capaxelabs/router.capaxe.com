@@ -368,14 +368,14 @@ export class ModelService {
 }
 
 // ============================================================================
-// Singleton Instance (for convenience)
+// Factory Function (creates new instance per request for worker safety)
 // ============================================================================
 
-let modelServiceInstance: ModelService | null = null
-
+/**
+ * Create a ModelService instance for the given database connection.
+ * In serverless/edge environments, each request should use its own instance
+ * to avoid stale connections across worker invocations.
+ */
 export function getModelService(db: any): ModelService {
-  if (!modelServiceInstance) {
-    modelServiceInstance = new ModelService(db)
-  }
-  return modelServiceInstance
+  return new ModelService(db)
 }

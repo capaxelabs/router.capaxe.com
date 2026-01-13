@@ -18,8 +18,8 @@ const admin = new Hono()
 // ============================================================================
 
 admin.get('/', async (c) => {
-  // Redirect to the static admin.html file served from public directory
-  return c.redirect('/admin.html')
+  // Redirect to the main SPA (admin is now integrated)
+  return c.redirect('/')
 })
 
 // Apply admin authentication to API routes only (not the UI)

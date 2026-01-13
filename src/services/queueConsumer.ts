@@ -3,9 +3,10 @@
  * This runs as a separate worker invocation when messages arrive in the queue
  */
 
-import { createDatabase } from '../db'
+import { createDatabase, Database } from '../db'
 import { CloudflareBindings } from '../types/env'
 import { QueueMessage, QueueService, createPollingMessage } from './queueService'
+import { getGeminiApiKey } from './googleAuth'
 
 /**
  * Process a batch of queue messages
@@ -121,28 +122,27 @@ async function processQueueMessage(
     imagesData: imagesData.length > 0 ? imagesData : undefined
   }
 
-  // Create queue service for database updates
-  const queueService = new QueueService(
-    null as any, // We don't need to send messages, only update DB
-    db
-  )
+  // Create queue service for database updates (pass db only, queue not needed for updates)
+  const queueService = new QueueService(db)
+
+  // Track start time for speed calculation
+  const startTime = Date.now()
 
   try {
     // Update status to processing
     await queueService.updateTaskProgress(taskId, {
       taskStatus: 'processing',
       taskProgress: 10,
-      taskStartedAt: Date.now()
+      taskStartedAt: startTime
     })
 
     // Process based on task type
     let result: any
-    const startTime = Date.now()
 
     if (type === 'image') {
-      result = await processImageTask(request, task.userId, env, queueService, taskId)
+      result = await processImageTask(request, task.userId, env, queueService, taskId, db)
     } else if (type === 'video') {
-      result = await processVideoTask(request, task.userId, env, queueService, taskId)
+      result = await processVideoTask(request, task.userId, env, queueService, taskId, db)
     } else if (type === 'video_poll') {
       result = await processVideoPollTask(message.body, env, queueService)
       return // Don't complete the task yet, just poll
@@ -200,7 +200,7 @@ async function processQueueMessage(
     await queueService.completeTask(taskId, {
       outputUrls: [],
       cost: 0,
-      speedMs: Date.now() - new Date().getTime(),
+      speedMs: Date.now() - startTime,
       provider: 'unknown',
       status: 'error',
       error: errorMessage
@@ -218,19 +218,14 @@ async function processImageTask(
   userId: string,
   env: CloudflareBindings,
   queueService: QueueService,
-  taskId: string
+  taskId: string,
+  db: Database
 ): Promise<any> {
   // Import required services
   const { generateImage } = await import('./imageService')
   const { getModelService } = await import('./modelService')
   const { setModelsCache } = await import('../shared/priceCalculator')
-  
-  // Create database connection
-  const db = createDatabase({
-    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
-    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
-  })
-  
+
   // Load models from database and initialize price calculator cache
   const modelService = getModelService(db)
   const models = await modelService.getActiveModelsAsObject('image')
@@ -280,19 +275,14 @@ async function processVideoTask(
   userId: string,
   env: CloudflareBindings,
   queueService: QueueService,
-  taskId: string
+  taskId: string,
+  db: Database
 ): Promise<any> {
   // Import required services
   const { generateVideo } = await import('./videoService')
   const { getModelService } = await import('./modelService')
   const { setModelsCache } = await import('../shared/priceCalculator')
-  
-  // Create database connection
-  const db = createDatabase({
-    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
-    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
-  })
-  
+
   // Load models from database and initialize price calculator cache
   const modelService = getModelService(db)
   const models = await modelService.getActiveModelsAsObject('video')
@@ -347,7 +337,7 @@ export async function handleFailedMessages(
     TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
   })
 
-  const queueService = new QueueService(null as any, db)
+  const queueService = new QueueService(db)
 
   for (const message of batch.messages) {
     try {
@@ -389,25 +379,13 @@ async function processVideoPollTask(
 
   const { provider, operationId, pollAttempt, maxPollAttempts, pollInterval = 30 } = pollingData
 
-  // Route to provider-specific polling handler
+  // Route to provider-specific polling handler (only Google supported)
   switch (provider) {
     case 'google':
       await pollGoogleOperation(message, env, queueService)
       break
-    case 'replicate':
-      await pollReplicateOperation(message, env, queueService)
-      break
-    case 'runpod':
-      await pollRunpodOperation(message, env, queueService)
-      break
-    case 'fal':
-      await pollFalOperation(message, env, queueService)
-      break
-    case 'luma':
-      await pollLumaOperation(message, env, queueService)
-      break
     default:
-      throw new Error(`Unsupported polling provider: ${provider}`)
+      throw new Error(`Unsupported polling provider: ${provider}. Only 'google' is supported.`)
   }
 }
 
@@ -429,8 +407,8 @@ async function pollGoogleOperation(
 
   // Import Google GenAI SDK
   const { GoogleGenAI } = await import('@google/genai')
-  const providerKey = env.GOOGLE_GEMINI_API_KEY
-  
+  const providerKey = getGeminiApiKey('veo', env)
+
   if (!providerKey) {
     throw new Error('Google API key not configured')
   }
@@ -591,297 +569,6 @@ async function pollGoogleOperation(
         provider: 'google-veo',
         status: 'error',
         error: `Polling failed: ${error instanceof Error ? error.message : String(error)}`
-      })
-    }
-  }
-}
-
-/**
- * Poll Replicate operation status
- */
-async function pollReplicateOperation(
-  message: QueueMessage,
-  env: CloudflareBindings,
-  queueService: QueueService
-): Promise<void> {
-  const { taskId, userId, usageId, pollingData } = message
-  if (!pollingData) throw new Error('No polling data')
-
-  const { operationId, pollAttempt, maxPollAttempts, pollInterval = 10 } = pollingData
-  
-  try {
-    const response = await fetch(`https://api.replicate.com/v1/predictions/${operationId}`, {
-      headers: {
-        'Authorization': `Token ${env.REPLICATE_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const prediction = await response.json()
-    console.log(`Polling Replicate task ${taskId}, attempt ${pollAttempt}, status: ${prediction.status}`)
-
-    if (prediction.status === 'succeeded') {
-      await queueService.completeTask(taskId, {
-        outputUrls: prediction.output || [],
-        cost: Math.round(3.2 * 10000),
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'replicate',
-        status: 'success'
-      })
-    } else if (prediction.status === 'failed' || prediction.status === 'canceled') {
-      await queueService.completeTask(taskId, {
-        outputUrls: [],
-        cost: 0,
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'replicate',
-        status: 'error',
-        error: prediction.error || `Replicate prediction ${prediction.status}`
-      })
-    } else if (pollAttempt >= maxPollAttempts) {
-      await queueService.completeTask(taskId, {
-        outputUrls: [],
-        cost: 0,
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'replicate',
-        status: 'error',
-        error: `Replicate timeout after ${maxPollAttempts} attempts`
-      })
-    } else {
-      // Continue polling
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'replicate', operationId, pollAttempt + 1, maxPollAttempts, pollInterval
-      )
-      
-      const progressPercent = Math.min(90, 10 + (pollAttempt * 2))
-      await queueService.updateTaskProgress(taskId, { taskProgress: progressPercent })
-    }
-  } catch (error) {
-    console.error(`Replicate polling error:`, error)
-    if (pollAttempt < maxPollAttempts) {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'replicate', operationId, pollAttempt + 1, maxPollAttempts, pollInterval
-      )
-    } else {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'replicate', status: 'error',
-        error: `Replicate polling failed: ${error instanceof Error ? error.message : String(error)}`
-      })
-    }
-  }
-}
-
-/**
- * Poll Runpod operation status  
- */
-async function pollRunpodOperation(
-  message: QueueMessage,
-  env: CloudflareBindings,
-  queueService: QueueService
-): Promise<void> {
-  const { taskId, userId, usageId, pollingData } = message
-  if (!pollingData) throw new Error('No polling data')
-
-  const { operationId, pollAttempt, maxPollAttempts, pollInterval = 15, operationUrl } = pollingData
-  
-  try {
-    const statusUrl = operationUrl || `https://api.runpod.ai/v2/status/${operationId}`
-    
-    const response = await fetch(statusUrl, {
-      headers: {
-        'Authorization': `Bearer ${env.RUNPOD_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const result = await response.json()
-    console.log(`Polling Runpod task ${taskId}, attempt ${pollAttempt}, status: ${result.status}`)
-
-    if (result.status === 'COMPLETED') {
-      await queueService.completeTask(taskId, {
-        outputUrls: result.output?.videos || result.output || [],
-        cost: Math.round(3.2 * 10000),
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'runpod',
-        status: 'success'
-      })
-    } else if (result.status === 'FAILED') {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'runpod', status: 'error',
-        error: result.error || 'Runpod job failed'
-      })
-    } else if (pollAttempt >= maxPollAttempts) {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'runpod', status: 'error',
-        error: `Runpod timeout after ${maxPollAttempts} attempts`
-      })
-    } else {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'runpod', operationId, pollAttempt + 1, maxPollAttempts, pollInterval,
-        operationUrl
-      )
-      
-      const progressPercent = Math.min(90, 10 + (pollAttempt * 2))
-      await queueService.updateTaskProgress(taskId, { taskProgress: progressPercent })
-    }
-  } catch (error) {
-    console.error(`Runpod polling error:`, error)
-    if (pollAttempt < maxPollAttempts) {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'runpod', operationId, pollAttempt + 1, maxPollAttempts, pollInterval,
-        operationUrl
-      )
-    } else {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'runpod', status: 'error',
-        error: `Runpod polling failed: ${error instanceof Error ? error.message : String(error)}`
-      })
-    }
-  }
-}
-
-/**
- * Poll Fal.ai operation status
- */
-async function pollFalOperation(
-  message: QueueMessage,
-  env: CloudflareBindings,
-  queueService: QueueService
-): Promise<void> {
-  const { taskId, userId, usageId, pollingData } = message
-  if (!pollingData) throw new Error('No polling data')
-
-  const { operationId, pollAttempt, maxPollAttempts, pollInterval = 5 } = pollingData
-  
-  try {
-    const response = await fetch(`https://fal.run/fal-ai/fast-svd/requests/${operationId}/status`, {
-      headers: {
-        'Authorization': `Key ${env.FAL_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const result = await response.json()
-    console.log(`Polling Fal task ${taskId}, attempt ${pollAttempt}, status: ${result.status}`)
-
-    if (result.status === 'COMPLETED') {
-      await queueService.completeTask(taskId, {
-        outputUrls: result.video ? [result.video.url] : [],
-        cost: Math.round(3.2 * 10000),
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'fal',
-        status: 'success'
-      })
-    } else if (result.status === 'FAILED') {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'fal', status: 'error',
-        error: result.error || 'Fal.ai job failed'
-      })
-    } else if (pollAttempt >= maxPollAttempts) {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'fal', status: 'error',
-        error: `Fal.ai timeout after ${maxPollAttempts} attempts`
-      })
-    } else {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'fal', operationId, pollAttempt + 1, maxPollAttempts, pollInterval
-      )
-      
-      const progressPercent = Math.min(90, 10 + (pollAttempt * 2))
-      await queueService.updateTaskProgress(taskId, { taskProgress: progressPercent })
-    }
-  } catch (error) {
-    console.error(`Fal polling error:`, error)
-    if (pollAttempt < maxPollAttempts) {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'fal', operationId, pollAttempt + 1, maxPollAttempts, pollInterval
-      )
-    } else {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'fal', status: 'error',
-        error: `Fal polling failed: ${error instanceof Error ? error.message : String(error)}`
-      })
-    }
-  }
-}
-
-/**
- * Poll Luma operation status
- */
-async function pollLumaOperation(
-  message: QueueMessage,
-  env: CloudflareBindings,
-  queueService: QueueService
-): Promise<void> {
-  const { taskId, userId, usageId, pollingData } = message
-  if (!pollingData) throw new Error('No polling data')
-
-  const { operationId, pollAttempt, maxPollAttempts, pollInterval = 20 } = pollingData
-  
-  try {
-    const response = await fetch(`https://api.lumalabs.ai/dream-machine/v1/generations/${operationId}`, {
-      headers: {
-        'Authorization': `Bearer ${env.LUMA_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    const result = await response.json()
-    console.log(`Polling Luma task ${taskId}, attempt ${pollAttempt}, state: ${result.state}`)
-
-    if (result.state === 'completed') {
-      await queueService.completeTask(taskId, {
-        outputUrls: result.video ? [result.video.url] : [],
-        cost: Math.round(3.2 * 10000),
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'luma',
-        status: 'success'
-      })
-    } else if (result.state === 'failed') {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'luma', status: 'error',
-        error: result.failure_reason || 'Luma generation failed'
-      })
-    } else if (pollAttempt >= maxPollAttempts) {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'luma', status: 'error',
-        error: `Luma timeout after ${maxPollAttempts} attempts`
-      })
-    } else {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'luma', operationId, pollAttempt + 1, maxPollAttempts, pollInterval
-      )
-      
-      const progressPercent = Math.min(90, 10 + (pollAttempt * 2))
-      await queueService.updateTaskProgress(taskId, { taskProgress: progressPercent })
-    }
-  } catch (error) {
-    console.error(`Luma polling error:`, error)
-    if (pollAttempt < maxPollAttempts) {
-      await createPollingMessage(
-        env.ASYNC_QUEUE, taskId, userId, usageId,
-        'luma', operationId, pollAttempt + 1, maxPollAttempts, pollInterval
-      )
-    } else {
-      await queueService.completeTask(taskId, {
-        outputUrls: [], cost: 0, speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'luma', status: 'error',
-        error: `Luma polling failed: ${error instanceof Error ? error.message : String(error)}`
       })
     }
   }
