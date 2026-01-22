@@ -1,0 +1,105 @@
+meta {
+  name: Chat - Completions
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{BASE_URL}}/v1/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{api_key}}
+}
+
+body:json {
+  {
+    "model": "gemini-2.0-flash",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Hello, how are you?"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 1000,
+    "stream": false
+  }
+}
+
+docs {
+  # Chat Completions API
+
+  OpenAI-compatible chat completions endpoint with multi-provider routing.
+
+  ## Endpoint
+  `POST /v1/chat/completions`
+
+  ## Authentication
+  Required. Use Bearer token authentication with your API key.
+
+  ## Request Body
+
+  ### Required Parameters
+  - `model` (string) - Model ID to use
+  - `messages` (array) - Array of message objects with `role` and `content`
+
+  ### Optional Parameters
+  - `temperature` (number) - Sampling temperature (0-2). Default: 1
+  - `max_tokens` (integer) - Maximum tokens to generate
+  - `top_p` (number) - Nucleus sampling parameter
+  - `frequency_penalty` (number) - Frequency penalty (-2 to 2)
+  - `presence_penalty` (number) - Presence penalty (-2 to 2)
+  - `stop` (string | array) - Stop sequences
+  - `stream` (boolean) - Enable SSE streaming. Default: false
+
+  ## Provider Routing
+
+  Model names are automatically routed to providers:
+  - `gpt-*`, `o1-*`, `o3-*`, `chatgpt-*` → OpenAI
+  - `claude-*` → Anthropic
+  - `gemini-*`, `google/*` → Google
+
+  ## Response
+
+  ```json
+  {
+    "id": "chatcmpl-123",
+    "object": "chat.completion",
+    "created": 1704067200,
+    "model": "gemini-2.0-flash",
+    "choices": [{
+      "index": 0,
+      "message": {"role": "assistant", "content": "Hello!"},
+      "finish_reason": "stop"
+    }],
+    "usage": {
+      "prompt_tokens": 25,
+      "completion_tokens": 15,
+      "total_tokens": 40
+    }
+  }
+  ```
+
+  ## Streaming
+
+  Set `stream: true` for Server-Sent Events:
+  ```
+  data: {"id":"chatcmpl-123","choices":[{"delta":{"content":"Hi"}}]}
+  data: [DONE]
+  ```
+
+  ## Available Models
+
+  ### OpenAI
+  - gpt-4o, gpt-4o-mini, gpt-4-turbo
+  - o1, o1-mini, o3-mini
+
+  ### Anthropic
+  - claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
+  - claude-3-opus-20240229
+
+  ### Google
+  - gemini-2.0-flash-exp, gemini-2.0-flash
+  - gemini-1.5-pro, gemini-1.5-flash
+}

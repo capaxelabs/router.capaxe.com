@@ -1,0 +1,49 @@
+{
+  "name": "@imagerouter/sdk",
+  "version": "0.1.0",
+  "description": "Vercel AI SDK compatible provider for ImageRouter",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^1.0.0",
+    "@ai-sdk/provider-utils": "^2.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "ai": ">=4.0.0"
+  },
+  "keywords": [
+    "ai",
+    "vercel",
+    "ai-sdk",
+    "imagerouter",
+    "image-generation",
+    "text-generation",
+    "llm"
+  ],
+  "author": "ImageRouter",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imagerouter/imagerouter"
+  }
+}

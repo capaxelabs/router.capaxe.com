@@ -54,6 +54,7 @@ import playgroundRoutes from './routes/playground'
 import taskRoutes from './routes/tasks'
 import tasksPage from './routes/tasksPage'
 import runwareRoutes from './routes/runware'
+import chatRoutes from './routes/chat'
 
 // Models listing endpoint (Google models only for Phase 2)
 app.route('/v1/models', modelsRoutes)
@@ -78,6 +79,9 @@ app.route('/v1/media', mediaRoutes)
 
 // Task management routes for async processing
 app.route('/v1/tasks', taskRoutes)
+
+// Chat completions routes (OpenAI-compatible for Vercel AI SDK)
+app.route('/v1/chat', chatRoutes)
 
 // Tasks web page for viewing all tasks
 app.route('/tasks', tasksPage)

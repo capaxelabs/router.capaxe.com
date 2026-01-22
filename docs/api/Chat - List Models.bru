@@ -1,0 +1,53 @@
+meta {
+  name: Chat - List Models
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{BASE_URL}}/v1/chat/models
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{api_key}}
+}
+
+docs {
+  # List Chat Models
+
+  Get available chat/text generation models.
+
+  ## Endpoint
+  `GET /v1/chat/models`
+
+  ## Response
+
+  ```json
+  {
+    "object": "list",
+    "data": [
+      {
+        "id": "gpt-4o",
+        "object": "model",
+        "created": 1704067200,
+        "owned_by": "openai",
+        "description": "GPT-4o - Latest multimodal model"
+      },
+      {
+        "id": "claude-3-5-sonnet-20241022",
+        "object": "model",
+        "owned_by": "anthropic",
+        "description": "Claude 3.5 Sonnet - Best balance"
+      },
+      {
+        "id": "gemini-2.0-flash",
+        "object": "model",
+        "owned_by": "google",
+        "description": "Gemini 2.0 Flash"
+      }
+    ]
+  }
+  ```
+}

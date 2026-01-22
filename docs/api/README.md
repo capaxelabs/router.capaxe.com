@@ -22,7 +22,25 @@ All generation endpoints use asynchronous processing by default:
 
 ## 📁 Core API Endpoints
 
-### 1. **Image - Generate** (`Image - Generate.bru`)
+### 1. **Chat Completions** (`Chat - Completions.bru`)
+```
+POST /v1/chat/completions
+GET /v1/chat/models
+```
+OpenAI-compatible text generation with multi-provider routing.
+
+**Supported Providers:**
+- OpenAI (gpt-4o, o1, o3-mini)
+- Anthropic (claude-3-5-sonnet, claude-3-opus)
+- Google (gemini-2.0-flash, gemini-1.5-pro)
+
+**Related:**
+- `Chat - Completions (Streaming).bru` - SSE streaming
+- `Chat - List Models.bru` - List available models
+
+---
+
+### 2. **Image - Generate** (`Image - Generate.bru`)
 ```
 POST /v1/images/generations
 ```
@@ -37,7 +55,7 @@ Generate images using Google Gemini, Imagen, or Runware models.
 
 ---
 
-### 2. **Video - Generate** (`Video - Generate.bru`)
+### 3. **Video - Generate** (`Video - Generate.bru`)
 ```
 POST /v1/videos/generations
 ```
@@ -51,7 +69,7 @@ Generate videos using Google Veo 2 and Veo 3 models.
 
 ---
 
-### 3. **Task - Get Status** (`Task - Get Status.bru`)
+### 4. **Task - Get Status** (`Task - Get Status.bru`)
 ```
 GET /v1/tasks/{taskId}
 ```
@@ -65,7 +83,7 @@ Poll async task status for image/video generation.
 
 ---
 
-### 4. **Models - List** (`Models - List.bru`)
+### 5. **Models - List** (`Models - List.bru`)
 ```
 GET /v1/models
 ```
@@ -75,6 +93,27 @@ Get all available models with capabilities and pricing.
 - `type` - Filter by "image" or "video"
 - `status` - Filter by "active", "beta", "deprecated"
 - `provider` - Filter by provider (e.g., "google", "runware")
+
+---
+
+### 6. **SDK Integration**
+TypeScript SDK for Vercel AI SDK integration. See `packages/sdk/` in the repository.
+
+```typescript
+import { createImageRouter } from '@imagerouter/sdk';
+import { generateText, generateImage } from 'ai';
+
+const imagerouter = createImageRouter({ apiKey: 'YOUR_KEY' });
+
+// Text
+await generateText({ model: imagerouter.chat('gemini-2.0-flash'), prompt: 'Hi' });
+
+// Image
+await generateImage({ model: imagerouter.image('google/imagen-4'), prompt: 'Sunset' });
+
+// Video
+const { videos } = await imagerouter.video('google/veo-2').generate({ prompt: 'Sunset timelapse' });
+```
 
 ---
 
