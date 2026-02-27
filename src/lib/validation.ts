@@ -67,11 +67,14 @@ export const VideoGenerationRequestSchema = z.object({
   response_format: z.enum(['url', 'b64_json']).default('url'),
   negative_prompt: z.string().optional(),
   user: z.string().optional(),
-  // Veo API specific parameters
-  aspect_ratio: z.enum(['16:9', '9:16']).default('16:9'),
+  // Aspect ratio (Veo supports 16:9/9:16, Kling also supports 1:1)
+  aspect_ratio: z.enum(['16:9', '9:16', '1:1']).default('16:9'),
   resolution: z.enum(['720p', '1080p']).default('720p'),
   person_generation: z.enum(['allow_all', 'allow_adult', 'dont_allow']).default('allow_all'),
   seed: z.number().int().optional(),
+  guidance_scale: z.number().min(0).max(1).optional(),
+  start_image: z.string().url().optional(),
+  end_image: z.string().url().optional(),
   image: z.union([
     z.string(),  // Legacy: Base64 string or URL
     Base64ImageSchema, // Preferred: Structured base64 object  

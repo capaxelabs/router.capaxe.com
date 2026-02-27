@@ -96,6 +96,9 @@ export async function generateImage(
       // Runware generation (called from queue consumer for async or directly for sync)
       result = await generateRunware(c, { ...processedParams, model: actualModel }, userId)
       break
+    case 'replicate':
+      result = await generateReplicate(c, { ...processedParams, model: actualModel }, userId)
+      break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
   }
@@ -400,6 +403,80 @@ async function generateRunware(
       error: {
         message: error instanceof Error ? error.message : String(error),
         type: 'runware_generation_error'
+      },
+      original_response_from_provider: error
+    }
+
+    throw new Error(JSON.stringify(formattedError))
+  }
+}
+
+/**
+ * Generate images using Replicate API
+ */
+async function generateReplicate(
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
+  params: ImageGenerationParams & { model: string },
+  userId: string
+): Promise<GenerationResult> {
+  const providerKey = c.env.REPLICATE_API_KEY
+
+  if (!providerKey) {
+    throw new Error('REPLICATE_API_KEY environment variable is not configured')
+  }
+
+  try {
+    const { getReplicateService } = await import('./replicateService')
+    const replicateService = getReplicateService(providerKey)
+
+    // Build Replicate input from request params
+    const input: Record<string, any> = {}
+
+    // Image URL (for upscalers and img2img models)
+    if (params.image && typeof params.image === 'string') {
+      input.image = params.image
+    } else if (params.imagesData?.[0]?.data) {
+      // Convert base64 to data URI for Replicate
+      const imgData = params.imagesData[0]
+      const mimeType = imgData.type || 'image/png'
+      input.image = `data:${mimeType};base64,${imgData.data}`
+    }
+
+    // Pass through any extra params from the request that Replicate models accept
+    // These are model-specific (e.g., scale_factor, creativity, upscale_factor)
+    const passthroughKeys = [
+      'scale_factor', 'creativity', 'output_format',
+      'upscale_factor', 'compression_quality',
+      'prompt', 'negative_prompt', 'seed', 'steps',
+      'guidance_scale', 'num_outputs', 'width', 'height',
+      'preserve_alpha', 'content_moderation', 'preserve_partial_alpha'
+    ]
+    for (const key of passthroughKeys) {
+      if ((params as any)[key] !== undefined) {
+        input[key] = (params as any)[key]
+      }
+    }
+
+    // Add prompt if not already added via passthrough
+    if (!input.prompt && params.prompt) {
+      input.prompt = params.prompt
+    }
+
+    console.log(`[Replicate] Model: ${params.model}, Input keys: ${Object.keys(input).join(', ')}`)
+
+    const result = await replicateService.generateImage({
+      model: params.model,
+      input
+    })
+
+    return result
+  } catch (error) {
+    const formattedError = {
+      status: 500,
+      statusText: 'INTERNAL_ERROR',
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        type: 'replicate_generation_error'
       },
       original_response_from_provider: error
     }

@@ -353,4 +353,56 @@ The following critical issues have been identified and fixed:
 | Imagen Models | 10 | Requires GOOGLE_SERVICE_ACCOUNT_KEY (Vertex AI) |
 | Veo Video Models | 3 | Via GEMINI_API_KEY |
 | Runware Models | 5 | Via RUNWARE_API_KEY |
-| **Total** | **21** | All models should now work with proper credentials |
+| Replicate Models | 3 | Via REPLICATE_API_KEY (2 image + 1 video) |
+| **Total** | **24** | All models should now work with proper credentials |
+
+---
+
+## Replicate Provider Integration (February 2026)
+
+### Completed
+- [x] Installed `replicate` npm package (v1.4.0)
+- [x] Created `src/services/replicateService.ts` — SDK wrapper with FileOutput handling
+- [x] Added `case 'replicate':` to `imageService.ts` and `videoService.ts` switch statements
+- [x] Created seed script `drizzle/seed-replicate-models.ts`
+- [x] Seeded 3 models into database (2 image upscalers + 1 video)
+- [x] Updated video validation schema for Kling params (1:1 aspect ratio, guidance_scale, start_image, end_image)
+
+### Models Added
+- `replicate/crystal-upscaler` — philz1337x/crystal-upscaler (6x upscale, creativity control)
+- `replicate/google-upscaler` — google/upscaler (4x upscale, compression quality control)
+- `replicate/kling-v2.5-turbo-pro` — kwaivgi/kling-v2.5-turbo-pro (text-to-video, image-to-video, 5s/10s)
+
+### Usage
+```bash
+# Seed models
+pnpm run db:seed-replicate
+
+# Image upscaler
+curl -X POST http://localhost:8787/v1/images/generations \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{
+    "model": "replicate/crystal-upscaler",
+    "prompt": "upscale",
+    "image": "https://example.com/photo.jpg",
+    "scale_factor": 4,
+    "creativity": 0,
+    "output_format": "png"
+  }'
+
+# Kling video generation
+curl -X POST http://localhost:8787/v1/videos/generations \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{
+    "model": "replicate/kling-v2.5-turbo-pro",
+    "prompt": "A man walking through Tokyo rain at night",
+    "duration": 5,
+    "aspect_ratio": "16:9",
+    "guidance_scale": 0.5
+  }'
+```
+
+### Adding More Replicate Models
+1. Add a new entry to `drizzle/seed-replicate-models.ts` with `providers: [{ id: 'replicate', model_name: 'owner/model-name', ... }]`
+2. Run `pnpm run db:seed-replicate`
+3. No code changes needed — the handler passes through model-specific input params automatically

@@ -88,6 +88,9 @@ export async function generateVideo(
       // Runware video generation
       result = await generateRunwareVideo(c, { ...processedParams, model: actualModel }, userId)
       break
+    case 'replicate':
+      result = await generateReplicateVideo(c, { ...processedParams, model: actualModel }, userId)
+      break
     default:
       throw new Error(`Provider '${selectedProvider.id}' not implemented`)
   }
@@ -794,5 +797,77 @@ async function generateRunwareVideo(
   } catch (error) {
     console.error('Runware video generation error:', error)
     throw new Error(`Runware video generation failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
+ * Generate video using Replicate API
+ */
+async function generateReplicateVideo(
+  c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
+  params: VideoGenerationParams & { model: string },
+  userId: string
+): Promise<VideoGenerationResult> {
+  const providerKey = c.env.REPLICATE_API_KEY
+
+  if (!providerKey) {
+    throw new Error('REPLICATE_API_KEY environment variable is not configured')
+  }
+
+  try {
+    const { getReplicateService } = await import('./replicateService')
+    const replicateService = getReplicateService(providerKey)
+
+    const input: Record<string, any> = {
+      prompt: params.prompt
+    }
+
+    if (params.duration) input.duration = params.duration
+    if (params.negative_prompt) input.negative_prompt = params.negative_prompt
+    if (params.seed) input.seed = params.seed
+    if (params.aspect_ratio) input.aspect_ratio = params.aspect_ratio
+
+    // Replicate-specific passthrough params (guidance_scale, start_image, end_image, etc.)
+    const passthroughKeys = [
+      'guidance_scale', 'start_image', 'end_image',
+      'cfg_scale', 'num_frames'
+    ]
+    for (const key of passthroughKeys) {
+      if ((params as any)[key] !== undefined) {
+        input[key] = (params as any)[key]
+      }
+    }
+
+    // Image-to-video: start_image takes priority, then image URL, then base64
+    if (!input.start_image) {
+      if (params.image && typeof params.image === 'string') {
+        input.start_image = params.image
+      } else if (params.imagesData?.[0]?.data) {
+        const imgData = params.imagesData[0]
+        const mimeType = imgData.type || 'image/png'
+        input.start_image = `data:${mimeType};base64,${imgData.data}`
+      }
+    }
+
+    console.log(`[Replicate Video] Model: ${params.model}, Input keys: ${Object.keys(input).join(', ')}`)
+
+    const result = await replicateService.generateImage({
+      model: params.model,
+      input
+    })
+
+    return result
+  } catch (error) {
+    const formattedError = {
+      status: 500,
+      statusText: 'INTERNAL_ERROR',
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        type: 'replicate_video_generation_error'
+      },
+      original_response_from_provider: error
+    }
+
+    throw new Error(JSON.stringify(formattedError))
   }
 }
