@@ -4,9 +4,8 @@ export interface CloudflareBindings {
   // AI Gateway to route through (optional - defaults to the auto-created 'default' gateway)
   CF_AI_GATEWAY_ID?: string
 
-  // Database
-  TURSO_DATABASE_URL: string
-  TURSO_AUTH_TOKEN: string
+  // Database (Cloudflare D1)
+  DB: D1Database
 
   // Storage
   STORAGE_BUCKET: R2Bucket

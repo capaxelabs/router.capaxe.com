@@ -69,7 +69,7 @@ export async function generateVideo(
   }
   delete processedParams.files
 
-  let result = await generateCloudflareVideo(c, { ...processedParams, model: actualModel })
+  let result = await generateCloudflareVideo(c, { ...processedParams, model: actualModel }, selectedProvider)
 
   result.latency = Date.now() - startTime
 
@@ -96,7 +96,8 @@ export async function generateVideo(
  */
 async function generateCloudflareVideo(
   c: Context<{ Bindings: CloudflareBindings; Variables: ContextVariables }>,
-  params: VideoGenerationParams & { model: string }
+  params: VideoGenerationParams & { model: string },
+  providerConfig: { inputImageParam?: string; durationFormat?: string } = {}
 ): Promise<VideoGenerationResult> {
   const inputs: Record<string, any> = {
     prompt: params.prompt
@@ -113,14 +114,20 @@ async function generateCloudflareVideo(
   }
 
   if (params.resolution) inputs.resolution = params.resolution
-  if (params.duration) inputs.duration = params.duration
+  if (params.duration) {
+    // e.g. Veo expects '8s' strings; Seedance expects plain numbers
+    inputs.duration = providerConfig.durationFormat === 'seconds-string' && typeof params.duration === 'number'
+      ? `${params.duration}s`
+      : params.duration
+  }
   if (params.negative_prompt) inputs.negative_prompt = params.negative_prompt
   if (params.seed) inputs.seed = params.seed
 
   // Image-to-video: pass the reference image as a data URI
+  // (catalog convention is 'image_input', e.g. google/veo-3.1)
   if (params.imagesData && params.imagesData.length > 0 && params.imagesData[0].data) {
     const first = params.imagesData[0]
-    inputs.image = `data:${first.type || 'image/png'};base64,${first.data}`
+    inputs[providerConfig.inputImageParam || 'image_input'] = `data:${first.type || 'image/png'};base64,${first.data}`
   }
 
   const response = await runModel(c.env, params.model, inputs)

@@ -495,3 +495,26 @@ Supersedes the "Cloudflare AI Gateway (2026-07-30)" section above: direct provid
 
 ### Notes
 - Audit findings from 2026-07-30 above still apply except: video proxy (removed), constructor swap (fixed), Veo polling issues (machinery removed), Replicate/CLAUDE.md contradiction (resolved — CLAUDE.md updated)
+
+---
+
+## D1 Migration + Full Model Catalog Seed (2026-07-31)
+
+### Features
+- [x] Replaced Turso (libSQL) with Cloudflare D1
+  - [x] Created D1 database `imagerouter` (id `2d9212ff-9135-4ea0-9d2d-76de2a78f641`, APAC) and bound as `DB` in wrangler.jsonc
+  - [x] Applied all 4 journaled migrations to D1
+  - [x] Migrated Turso data: 2 users, 2 api_keys, 58 api_usage rows (via `drizzle/migrate-turso-to-d1.ts`; export file deleted after import - contains live API keys)
+  - [x] Rewrote DB layer to `drizzle-orm/d1`: `src/db/index.ts`, `middleware/database.ts`, `queueConsumer.ts`, `tasksPage.ts`
+  - [x] `drizzle.config.ts` → sqlite + d1-http driver (needs `CLOUDFLARE_D1_TOKEN` for db:migrate/db:studio)
+  - [x] `@libsql/client` moved to devDependencies (only used by drizzle/ scripts); wrangler bumped to ^4.117 (4.39 had a broken `d1 execute --file`)
+- [x] Seeded ALL image + video models from the Cloudflare AI catalog into D1: 73 models (48 image, 25 video) across @cf/Workers AI, google, openai, bytedance, black-forest-labs, alibaba, krea, recraft, pruna, minimax, pixverse, runwayml, vidu, xai
+  - [x] `npm run db:seed-cloudflare` regenerates + re-applies (idempotent upsert)
+  - [x] Old google/runware/replicate model rows were NOT migrated - D1 has only the new catalog
+- [x] videoService: per-model provider hints (`inputImageParam`, default `image_input`; `durationFormat: 'seconds-string'` for Veo)
+
+### Follow-ups
+- [ ] Prices in the seed are ESTIMATES - catalog shows pricing only in the Cloudflare dashboard; verify before wiring billing
+- [ ] Old Turso database still exists untouched - decommission after confirming D1 in production
+- [ ] Legacy scripts still point at Turso and are obsolete: `src/db/seed.ts`, `drizzle/seed-replicate-models.ts`, `seed-gemini-image-models.ts`, `seed-new-image-models.ts`, `seed-photomaker.ts` (+ their npm scripts) - delete
+- [ ] `db:studio`/`db:migrate` need `CLOUDFLARE_D1_TOKEN` (API token with D1 edit) in `.env`

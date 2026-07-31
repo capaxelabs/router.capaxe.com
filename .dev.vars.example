@@ -6,9 +6,8 @@
 # Optional: name of the AI Gateway to route through (defaults to 'default')
 CF_AI_GATEWAY_ID=default
 
-# Database (Turso)
-TURSO_DATABASE_URL=libsql://your-database.turso.io
-TURSO_AUTH_TOKEN=your-turso-auth-token
+# Database: Cloudflare D1 via the DB binding in wrangler.jsonc - no credentials needed.
+# `wrangler dev` uses a local D1 copy; add --remote to hit the real database.
 
 # Storage (R2) - S3 API credentials required for uploads
 R2_BUCKET_NAME=imagerouter

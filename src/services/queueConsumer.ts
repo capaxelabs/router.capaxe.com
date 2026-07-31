@@ -41,10 +41,7 @@ async function processQueueMessage(
   const { taskId, type, userId } = message.body
 
   // Create database connection
-  const db = createDatabase({
-    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
-    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
-  })
+  const db = createDatabase(env.DB)
 
   // Fetch task data from database
   const { apiUsage } = await import('../db/schema')
@@ -299,10 +296,7 @@ export async function handleFailedMessages(
 ): Promise<void> {
   console.log(`Processing ${batch.messages.length} failed messages`)
 
-  const db = createDatabase({
-    TURSO_DATABASE_URL: env.TURSO_DATABASE_URL,
-    TURSO_AUTH_TOKEN: env.TURSO_AUTH_TOKEN
-  })
+  const db = createDatabase(env.DB)
 
   const queueService = new QueueService(db)
 

@@ -14,11 +14,10 @@
     "db:seed-new-models": "tsx drizzle/seed-new-image-models.ts",
     "db:seed-photomaker": "tsx drizzle/seed-photomaker.ts",
     "db:seed-replicate": "tsx drizzle/seed-replicate-models.ts",
-    "db:seed-cloudflare": "tsx drizzle/seed-cloudflare-models.ts"
+    "db:seed-cloudflare": "tsx drizzle/seed-cloudflare-models.ts && wrangler d1 execute imagerouter --remote -y --file=drizzle/seed-cloudflare-models.sql"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.4.1",
-    "@libsql/client": "^0.14.0",
     "cuid": "^3.0.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.36.4",
@@ -26,9 +25,10 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@libsql/client": "^0.14.0",
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.28.1",
     "tsx": "^4.20.6",
-    "wrangler": "^4.4.0"
+    "wrangler": "^4.117.0"
   }
 }

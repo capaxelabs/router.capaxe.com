@@ -13,10 +13,7 @@ const app = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables
 app.get('/', async (c) => {
   try {
     // Get database connection
-    const db = createDatabase({
-      TURSO_DATABASE_URL: c.env.TURSO_DATABASE_URL,
-      TURSO_AUTH_TOKEN: c.env.TURSO_AUTH_TOKEN
-    })
+    const db = createDatabase(c.env.DB)
 
     // Get all async tasks from the last 7 days
     const tasks = await db

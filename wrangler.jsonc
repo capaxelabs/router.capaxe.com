@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "imagerouter",
+  "account_id": "81cac75fe318d80f4344481afc4799ac",
   "main": "src/index.ts",
   "compatibility_date": "2025-09-24",
   "keep_vars": true,
@@ -13,6 +14,13 @@
   "ai": {
     "binding": "AI"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "imagerouter",
+      "database_id": "2d9212ff-9135-4ea0-9d2d-76de2a78f641"
+    }
+  ],
   "vars": {
     "ENVIRONMENT": "development",
     "R2_BUCKET_NAME": "imagerouter",

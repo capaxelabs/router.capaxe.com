@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ImageRouter is a unified proxy API providing OpenAI-compatible endpoints for AI image and video generation. It abstracts multiple provider APIs behind a single interface with authentication, billing, storage, and async task processing.
 
-**Stack:** Cloudflare Workers + Hono framework + Drizzle ORM + Turso (libSQL) + R2 storage + Cloudflare Queues
+**Stack:** Cloudflare Workers + Hono framework + Drizzle ORM + Cloudflare D1 (via the `DB` binding) + R2 storage + Cloudflare Queues
 
 **Providers:** Cloudflare AI only. All inference goes through the `env.AI` binding + AI Gateway ([src/services/cloudflareAI.ts](src/services/cloudflareAI.ts)): Workers AI models (`@cf/...`, Workers AI pricing) and third-party catalog models (`{author}/{model}` e.g. `google/veo-3.1`, billed via Cloudflare Unified Billing). No provider API keys. Direct provider integrations (Gemini, Vertex, OpenAI, Anthropic, Runware, Replicate) were removed.
 
@@ -139,7 +139,7 @@ Cost stored as `cost * 10000` (integer) for precision.
 
 ## Environment Variables
 
-**Required:** `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_SECRET`, `ADMIN_API_KEY`
+**Required:** `JWT_SECRET`, `ADMIN_API_KEY`. The database is the D1 `DB` binding in `wrangler.jsonc` (no credentials). Apply migrations with `wrangler d1 execute imagerouter --remote --file=drizzle/<migration>.sql`, or `npm run db:migrate` after setting `CLOUDFLARE_D1_TOKEN`.
 
 **R2:** `R2_BUCKET_NAME`, `R2_CUSTOM_PUBLIC_URL`, plus `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` for S3 API auth
 
