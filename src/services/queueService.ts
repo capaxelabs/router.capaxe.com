@@ -70,6 +70,8 @@ export class QueueService {
     }
 
     // Store metadata including input image URLs
+    const { truncateDeep } = await import('../lib/logSanitizer')
+    const { apiKeyId: _apiKeyId, ip: _ip, ...requestForLog } = request
     const metadata: any = {
       inputImageUrls: inputImageUrls.length > 0 ? inputImageUrls : undefined,
       originalRequest: {
@@ -78,7 +80,9 @@ export class QueueService {
         n: request.n,
         duration: request.duration,
         resolution: request.resolution
-      }
+      },
+      // Full request copy for auditing (long strings truncated)
+      request: truncateDeep(requestForLog)
     }
 
     // Create initial record in api_usage table

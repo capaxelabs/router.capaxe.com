@@ -155,6 +155,16 @@ async function processQueueMessage(
       status: 'success'
     })
 
+    // Store truncated provider response in task metadata for auditing
+    try {
+      const { truncateDeep } = await import('../lib/logSanitizer')
+      await db.update(apiUsage)
+        .set({ metadata: JSON.stringify({ ...metadata, response: truncateDeep(result) }) })
+        .where(eq(apiUsage.taskId, taskId))
+    } catch (metaError) {
+      console.error(`Failed to store response metadata for ${taskId}:`, metaError)
+    }
+
   } catch (error) {
     console.error(`Task ${taskId} processing failed:`, error)
 

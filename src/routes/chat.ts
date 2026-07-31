@@ -3,6 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import { CloudflareBindings, ContextVariables } from '../types/env'
 import { validateApiKey } from '../middleware/apiKeyMiddleware'
 import { aiRunOptions } from '../services/cloudflareAI'
+import { truncateDeep } from '../lib/logSanitizer'
 
 const chat = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
@@ -59,6 +60,55 @@ async function getTextModelPricing(c: any, modelId: string): Promise<{ value?: n
 }
 
 /**
+ * Log a chat completion to api_usage with truncated request/response.
+ */
+async function logChatCall(c: any, entry: {
+  model: string
+  request: ChatCompletionRequest
+  response: any
+  usage: any
+  status: 'success' | 'error'
+  error?: string
+  startTime: number
+}): Promise<void> {
+  try {
+    const db = c.get('db')
+    const user = c.get('authenticatedUser')
+    if (!db || !user) return
+
+    const { apiUsage } = await import('../db/schema')
+
+    const lastUserMsg = [...(entry.request.messages || [])].reverse().find(m => m.role === 'user')
+    const promptText = typeof lastUserMsg?.content === 'string'
+      ? lastUserMsg.content
+      : JSON.stringify(lastUserMsg?.content || '')
+
+    await db.insert(apiUsage).values({
+      id: crypto.randomUUID(),
+      taskId: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      model: entry.model,
+      provider: 'workers-ai',
+      prompt: promptText.slice(0, 300),
+      cost: Math.round((entry.usage?.cost || 0) * 10000), // 1e-4 USD units
+      speedMs: Date.now() - entry.startTime,
+      imageSize: 'n/a',
+      status: entry.status,
+      error: entry.error ? String(entry.error).slice(0, 500) : null,
+      userId: user.id,
+      apiKeyId: user.apiKeyId,
+      apiKeyTempJwt: user.isTemporaryJwt,
+      metadata: JSON.stringify({
+        request: truncateDeep(entry.request),
+        response: truncateDeep(entry.response),
+        usage: entry.usage || null,
+      }),
+    })
+  } catch (logError) {
+    console.error('Failed to log chat call:', logError)
+  }
+}
+
+/**
  * Flatten OpenAI-style content parts to plain text (Workers AI expects strings).
  */
 function normalizeMessages(messages: ChatMessage[]): Array<{ role: string; content: string }> {
@@ -102,6 +152,7 @@ function toOpenAIResponse(aiResponse: any, model: string): any {
 
 // POST /v1/chat/completions
 chat.post('/completions', async (c) => {
+  const startTime = Date.now()
   let body: ChatCompletionRequest
   try {
     body = await c.req.json<ChatCompletionRequest>()
@@ -148,6 +199,10 @@ chat.post('/completions', async (c) => {
         const decoder = new TextDecoder()
         let buffer = ''
         let lastUsage: any = null
+        let streamedText = ''
+        const appendText = (t: string) => {
+          if (streamedText.length < 2000) streamedText += t
+        }
 
         while (true) {
           const { done, value } = await reader.read()
@@ -171,12 +226,15 @@ chat.post('/completions', async (c) => {
 
               // Already OpenAI chunk format - pass through
               if (parsed.choices) {
+                const delta = parsed.choices[0]?.delta?.content
+                if (typeof delta === 'string') appendText(delta)
                 await sseStream.writeSSE({ data: JSON.stringify(parsed) })
                 continue
               }
 
               // Workers AI format: { response: '<delta text>' }
               if (typeof parsed.response === 'string' && parsed.response.length > 0) {
+                appendText(parsed.response)
                 await sseStream.writeSSE({
                   data: JSON.stringify({
                     id: `chatcmpl-${Date.now()}`,
@@ -214,6 +272,15 @@ chat.post('/completions', async (c) => {
           })
         })
         await sseStream.writeSSE({ data: '[DONE]' })
+
+        await logChatCall(c, {
+          model,
+          request: body,
+          response: { content: streamedText, streamed: true },
+          usage: lastUsage,
+          status: 'success',
+          startTime,
+        })
       })
     }
 
@@ -227,10 +294,30 @@ chat.post('/completions', async (c) => {
       if (costInfo) Object.assign(openaiResponse.usage, costInfo)
     }
 
+    c.executionCtx.waitUntil(logChatCall(c, {
+      model,
+      request: body,
+      response: openaiResponse,
+      usage: openaiResponse.usage,
+      status: 'success',
+      startTime,
+    }))
+
     return c.json(openaiResponse)
 
   } catch (error: any) {
     console.error('Chat completion error:', error)
+
+    c.executionCtx.waitUntil(logChatCall(c, {
+      model,
+      request: body,
+      response: null,
+      usage: null,
+      status: 'error',
+      error: error.message || String(error),
+      startTime,
+    }))
+
     return c.json({
       error: {
         message: error.message || 'Internal server error',
