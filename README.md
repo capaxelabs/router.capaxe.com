@@ -7,7 +7,7 @@ This is the Cloudflare Workers/Hono version of ImageRouter API, currently in Pha
 The foundation infrastructure has been completed:
 
 - ✅ Drizzle ORM with libSQL/Turso database
-- ✅ Cloudflare Workers environment configuration  
+- ✅ Cloudflare Workers environment configuration
 - ✅ Database schema migration (Prisma → Drizzle)
 - ✅ Environment variables setup
 - ✅ R2 storage configuration
@@ -21,29 +21,33 @@ The foundation infrastructure has been completed:
 ## Setup
 
 1. **Install dependencies:**
+
    ```bash
    npm install
    ```
 
 2. **Set up environment variables:**
+
    ```bash
    cp .env.example .env
    # Edit .env with your actual values
    ```
 
 3. **Configure Turso database:**
+
    ```bash
    # Create a Turso database
    turso db create imagerouter-hono
-   
+
    # Get the database URL and auth token
    turso db show imagerouter-hono --url
    turso db tokens create imagerouter-hono
-   
+
    # Update wrangler.jsonc with database IDs (optional for D1)
    ```
 
 4. **Generate database schema:**
+
    ```bash
    npm run db:generate
    npm run db:migrate
@@ -101,54 +105,58 @@ To add a new Google image or video model:
    - **Videos:** `src/shared/videoModels/google/your-model-name.ts`
 
 2. **Model file structure:**
+
    ```typescript
-   import { PRICING_TYPES } from '../../PricingScheme'
-   import { ModelData } from './imagen-3'
+   import { PRICING_TYPES } from "../../PricingScheme";
+   import { ModelData } from "./imagen-3";
 
    class YourModelName {
-     data: ModelData
+     data: ModelData;
 
      constructor() {
        this.data = {
-         id: 'google/your-model-name',
-         providers: [{
-           id: 'gemini',  // or 'vertex', 'geminiImagen'
-           model_name: 'actual-api-model-name',
-           pricing: {
-             type: PRICING_TYPES.FIXED,  // or CALCULATED, POST_GENERATION
-             value: 0.01,
+         id: "google/your-model-name",
+         providers: [
+           {
+             id: "gemini", // or 'vertex', 'geminiImagen'
+             model_name: "actual-api-model-name",
+             pricing: {
+               type: PRICING_TYPES.FIXED, // or CALCULATED, POST_GENERATION
+               value: 0.01,
+             },
+             // Optional: Add transform functions if needed
+             applyImage: this.applyImage,
+             applyQuality: this.applyQuality,
            },
-           // Optional: Add transform functions if needed
-           applyImage: this.applyImage,
-           applyQuality: this.applyQuality,
-         }],
+         ],
          arena_score: 1200,
-         release_date: '2024-01-01',
-         examples: []
-       }
+         release_date: "2024-01-01",
+         examples: [],
+       };
      }
 
      getData(): ModelData {
-       return this.data
+       return this.data;
      }
    }
 
-   export default YourModelName
+   export default YourModelName;
    ```
 
 3. **Export from index.ts** in `src/shared/imageModels/google/index.ts` or `src/shared/videoModels/google/index.ts`:
+
    ```typescript
-   import YourModelName from './your-model-name'
-   
+   import YourModelName from "./your-model-name";
+
    export const googleImageModels = {
      // ... existing models
-     'google/your-model-name': new YourModelName().getData(),
-   }
-   
+     "google/your-model-name": new YourModelName().getData(),
+   };
+
    export {
      // ... existing exports
-     YourModelName
-   }
+     YourModelName,
+   };
    ```
 
 4. **That's it!** The model is automatically integrated into:
@@ -166,54 +174,58 @@ To add a new Runware image or video model:
    - **Videos:** `src/shared/videoModels/runware/your-model-name.ts`
 
 2. **Model file structure:**
+
    ```typescript
-   import { PRICING_TYPES } from '../../PricingScheme'
-   import { ModelData } from '../google/imagen-3'
+   import { PRICING_TYPES } from "../../PricingScheme";
+   import { ModelData } from "../google/imagen-3";
 
    class YourModelName {
-     data: ModelData
+     data: ModelData;
 
      constructor() {
        this.data = {
-         id: 'runware/your-model-name',
-         providers: [{
-           id: 'runware',
-           model_name: 'provider:model-id',  // Runware model identifier
-           pricing: {
-             type: PRICING_TYPES.FIXED,  // or POST_GENERATION
-             value: 0.35,
-             // For POST_GENERATION pricing:
-             // postCalcFunction: postCalcSimple,
-             // range: { min: 0.001, average: 0.002, max: 0.03 }
+         id: "runware/your-model-name",
+         providers: [
+           {
+             id: "runware",
+             model_name: "provider:model-id", // Runware model identifier
+             pricing: {
+               type: PRICING_TYPES.FIXED, // or POST_GENERATION
+               value: 0.35,
+               // For POST_GENERATION pricing:
+               // postCalcFunction: postCalcSimple,
+               // range: { min: 0.001, average: 0.002, max: 0.03 }
+             },
            },
-         }],
+         ],
          arena_score: 1150,
-         release_date: '2024-01-01',
-         examples: []
-       }
+         release_date: "2024-01-01",
+         examples: [],
+       };
      }
 
      getData(): ModelData {
-       return this.data
+       return this.data;
      }
    }
 
-   export default YourModelName
+   export default YourModelName;
    ```
 
 3. **Export from index.ts** in `src/shared/imageModels/runware/index.ts` or `src/shared/videoModels/runware/index.ts`:
+
    ```typescript
-   import YourModelName from './your-model-name'
-   
+   import YourModelName from "./your-model-name";
+
    export const runwareImageModels = {
      // ... existing models
-     'runware/your-model-name': new YourModelName().getData(),
-   }
-   
+     "runware/your-model-name": new YourModelName().getData(),
+   };
+
    export {
      // ... existing exports
-     YourModelName
-   }
+     YourModelName,
+   };
    ```
 
 4. **That's it!** The model is automatically integrated into all systems.
@@ -245,7 +257,7 @@ npm run cf-typegen
 
 # Database operations
 npm run db:generate  # Generate migrations
-npm run db:migrate   # Apply migrations  
+npm run db:migrate   # Apply migrations
 npm run db:studio    # Open Drizzle Studio
 
 # Deploy
@@ -260,3 +272,5 @@ npm run deploy
 - **Storage:** Cloudflare R2
 - **Validation:** Zod
 - **TypeScript:** Full type safety
+
+Test

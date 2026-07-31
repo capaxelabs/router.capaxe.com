@@ -55,7 +55,7 @@ export interface HydratedModel extends Omit<Model, 'providers' | 'capabilities' 
 }
 
 export interface ModelFilters {
-  type?: 'image' | 'video'
+  type?: 'image' | 'video' | 'text'
   status?: 'active' | 'inactive' | 'deprecated' | 'beta'
   isPublic?: boolean
   provider?: string
@@ -208,7 +208,7 @@ export class ModelService {
   /**
    * Get only active models
    */
-  async getActiveModels(type?: 'image' | 'video'): Promise<HydratedModel[]> {
+  async getActiveModels(type?: 'image' | 'video' | 'text'): Promise<HydratedModel[]> {
     return this.listModels({ status: 'active', isPublic: true, type })
   }
 
@@ -362,7 +362,7 @@ export class ModelService {
   /**
    * Get active models as a plain object (most common use case)
    */
-  async getActiveModelsAsObject(type?: 'image' | 'video'): Promise<Record<string, ModelData>> {
+  async getActiveModelsAsObject(type?: 'image' | 'video' | 'text'): Promise<Record<string, ModelData>> {
     return this.getAllModelsAsObject({ status: 'active', isPublic: true, type })
   }
 }

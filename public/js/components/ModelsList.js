@@ -1,10 +1,25 @@
 import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
 import { html } from './shared.js';
 
+const TYPE_STYLES = {
+  image: 'bg-blue-100 text-blue-700',
+  video: 'bg-green-100 text-green-700',
+  text: 'bg-purple-100 text-purple-700',
+};
+
+const formatPrice = (p) => {
+  const value = p?.value || 0;
+  const price = value < 0.01
+    ? `$${value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
+    : `$${value.toFixed(2).replace(/\.00$/, '')}`;
+  return p?.unit === 'per_1m_tokens' ? `${price}/1M tok` : price;
+};
+
 export const ModelsList = () => {
   const [models, setModels] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     fetch('/v1/models')
@@ -24,27 +39,43 @@ export const ModelsList = () => {
   }, []);
 
   const filteredModels = models?.filter(m => {
-    if (filter === 'all') return true;
-    return m.type === filter;
+    if (filter !== 'all' && m.type !== filter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q);
+    }
+    return true;
   });
 
   return html`
-    <div class="bg-white rounded-xl shadow-lg p-6">
+    <div class="bg-white rounded-xl shadow-lg p-4">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-bold text-gray-800">Available Models</h2>
-        
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <h2 class="text-lg font-bold text-gray-800 mr-auto">
+          Models
+          ${filteredModels && html`<span class="ml-2 text-sm font-normal text-gray-400">${filteredModels.length}</span>`}
+        </h2>
+
+        <input
+          type="text"
+          placeholder="Search models..."
+          value=${search}
+          onInput=${(e) => setSearch(e.target.value)}
+          class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-500 outline-none w-52"
+        />
+
         <select
           value=${filter}
           onChange=${(e) => setFilter(e.target.value)}
-          class="px-4 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-purple-500 outline-none"
+          class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-500 outline-none"
         >
-          <option value="all">All Models</option>
-          <option value="image">Images Only</option>
-          <option value="video">Videos Only</option>
+          <option value="all">All</option>
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="text">Text</option>
         </select>
       </div>
-      
+
       <!-- Loading State -->
       ${loading && html`
         <div class="text-center py-12">
@@ -52,71 +83,35 @@ export const ModelsList = () => {
           <p class="text-gray-600">Loading models...</p>
         </div>
       `}
-      
+
       <!-- Models List -->
       ${!loading && filteredModels && html`
-        <div class="grid gap-4">
+        <div class="divide-y divide-gray-100">
           ${filteredModels.map(model => html`
-            <div class="border-2 border-gray-200 rounded-xl p-6 hover:border-purple-400 transition">
-              <!-- Header -->
-              <div class="flex items-start justify-between mb-3">
-                <div>
-                  <h3 class="text-lg font-bold text-gray-800">${model.id}</h3>
-                  <span class="inline-block px-3 py-1 text-xs font-semibold rounded-full mt-2 ${
-                    model.type === 'image' 
-                      ? 'bg-blue-100 text-blue-800' 
-                      : 'bg-green-100 text-green-800'
-                  }">
-                    ${model.type}
-                  </span>
-                </div>
-                
-                <!-- Arena Score -->
-                <div class="text-right">
-                  <div class="text-sm text-gray-500">Arena Score</div>
-                  <div class="text-xl font-bold text-purple-600">
-                    ${model.arena_score || 'N/A'}
-                  </div>
-                </div>
-              </div>
-              
-              <!-- Providers and Pricing -->
-              <div class="grid grid-cols-2 gap-4 mt-4 text-sm">
-                <div>
-                  <div class="text-gray-500 mb-1 font-semibold">Providers</div>
-                  <div class="flex flex-wrap gap-1">
-                    ${model.providers?.map(p => html`
-                      <span class="px-2 py-1 bg-gray-100 rounded text-xs">
-                        ${p.id}
-                      </span>
-                    `)}
-                  </div>
-                </div>
-                
-                <div>
-                  <div class="text-gray-500 mb-1 font-semibold">Pricing</div>
-                  <div class="flex flex-wrap gap-1">
-                    ${model.providers?.map(p => html`
-                      <span class="px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-mono">
-                        $${(p.pricing?.value || 0).toFixed(3)}
-                      </span>
-                    `)}
-                  </div>
-                </div>
-              </div>
-              
-              <!-- Tags -->
-              ${model.tags && model.tags.length > 0 && html`
-                <div class="mt-4 flex flex-wrap gap-2">
-                  ${model.tags.map(tag => html`
-                    <span class="px-2 py-1 bg-purple-50 text-purple-700 rounded-full text-xs">
-                      ${tag}
-                    </span>
-                  `)}
-                </div>
+            <div class="flex items-center gap-3 py-1.5 px-2 hover:bg-gray-50 rounded transition text-sm">
+              <span class="shrink-0 w-12 text-center px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase ${TYPE_STYLES[model.type] || 'bg-gray-100 text-gray-600'}">
+                ${model.type}
+              </span>
+
+              <span class="font-mono text-gray-800 truncate" title=${model.description || model.id}>
+                ${model.id}
+              </span>
+
+              ${model.category && html`
+                <span class="hidden md:inline text-xs text-gray-400 truncate shrink-0">
+                  ${model.category}
+                </span>
               `}
+
+              <span class="ml-auto shrink-0 font-mono text-xs text-green-700">
+                ${formatPrice(model.providers?.[0]?.pricing)}
+              </span>
             </div>
           `)}
+
+          ${filteredModels.length === 0 && html`
+            <p class="text-center text-gray-400 py-8 text-sm">No models match</p>
+          `}
         </div>
       `}
     </div>

@@ -14,7 +14,7 @@
  */
 import { writeFileSync } from 'node:fs'
 
-type Task = 't2i' | 'i2i' | 't2v' | 'i2v'
+type Task = 't2i' | 'i2i' | 't2v' | 'i2v' | 'chat'
 
 interface CatalogModel {
   id: string
@@ -119,30 +119,156 @@ const VIDEO_MODELS: CatalogModel[] = [
   { id: 'xai/grok-imagine-video-1.5-preview', name: 'Grok Imagine Video 1.5 (Preview)', task: 'i2v', price: 0.40, description: 'xAI Grok Imagine 1.5 image-to-video via Unified Billing.' },
 ]
 
+/**
+ * Text-generation models: [model id, estimated USD per 1M output tokens].
+ * Names are derived from the id. Prices are ESTIMATES - verify in dashboard.
+ */
+const TEXT_MODEL_PRICES: Array<[string, number]> = [
+  // ---- Workers AI hosted ----
+  ['@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', 0.5],
+  ['@cf/google/gemma-2b-it-lora', 0.1],
+  ['@cf/google/gemma-3-12b-it', 0.35],
+  ['@cf/google/gemma-4-26b-a4b-it', 0.5],
+  ['@cf/google/gemma-7b-it-lora', 0.2],
+  ['@hf/google/gemma-7b-it', 0.2],
+  ['@cf/aisingapore/gemma-sea-lion-v4-27b-it', 0.5],
+  ['@cf/zai-org/glm-4.7-flash', 0.3],
+  ['@cf/zai-org/glm-5.2', 1.0],
+  ['@cf/openai/gpt-oss-120b', 0.75],
+  ['@cf/openai/gpt-oss-20b', 0.3],
+  ['@cf/ibm-granite/granite-4.0-h-micro', 0.1],
+  ['@hf/nousresearch/hermes-2-pro-mistral-7b', 0.2],
+  ['@cf/moonshotai/kimi-k2.5', 1.5],
+  ['@cf/moonshotai/kimi-k2.6', 1.5],
+  ['@cf/moonshotai/kimi-k2.7-code', 2.0],
+  ['@cf/meta/llama-2-7b-chat-fp16', 0.5],
+  ['@cf/meta-llama/llama-2-7b-chat-hf-lora', 0.2],
+  ['@cf/meta/llama-2-7b-chat-int8', 0.2],
+  ['@cf/meta/llama-3-8b-instruct', 0.3],
+  ['@cf/meta/llama-3-8b-instruct-awq', 0.25],
+  ['@cf/meta/llama-3.1-70b-instruct', 0.75],
+  ['@cf/meta/llama-3.1-8b-instruct', 0.3],
+  ['@cf/meta/llama-3.1-8b-instruct-awq', 0.25],
+  ['@cf/meta/llama-3.1-8b-instruct-fast', 0.3],
+  ['@cf/meta/llama-3.1-8b-instruct-fp8', 0.25],
+  ['@cf/meta/llama-3.2-11b-vision-instruct', 0.7],
+  ['@cf/meta/llama-3.2-1b-instruct', 0.1],
+  ['@cf/meta/llama-3.2-3b-instruct', 0.15],
+  ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', 0.75],
+  ['@cf/meta/llama-4-scout-17b-16e-instruct', 0.85],
+  ['@cf/meta/llama-guard-3-8b', 0.3],
+  ['@hf/meta-llama/meta-llama-3-8b-instruct', 0.3],
+  ['@cf/mistral/mistral-7b-instruct-v0.1', 0.2],
+  ['@hf/mistral/mistral-7b-instruct-v0.2', 0.2],
+  ['@cf/mistral/mistral-7b-instruct-v0.2-lora', 0.2],
+  ['@cf/mistralai/mistral-small-3.1-24b-instruct', 0.5],
+  ['@cf/nvidia/nemotron-3-120b-a12b', 1.0],
+  ['@cf/microsoft/phi-2', 0.1],
+  ['@cf/qwen/qwen2.5-coder-32b-instruct', 0.5],
+  ['@cf/qwen/qwen3-30b-a3b-fp8', 0.4],
+  ['@cf/qwen/qwq-32b', 0.6],
+  ['@cf/defog/sqlcoder-7b-2', 0.2],
+
+  // ---- Third-party catalog (Unified Billing) ----
+  ['alibaba/qwen3-max', 6.0],
+  ['alibaba/qwen3.5-397b-a17b', 3.0],
+  ['anthropic/claude-fable-5', 30.0],
+  ['anthropic/claude-haiku-4.5', 5.0],
+  ['anthropic/claude-opus-4.5', 75.0],
+  ['anthropic/claude-opus-4.6', 75.0],
+  ['anthropic/claude-opus-4.7', 75.0],
+  ['anthropic/claude-opus-4.8', 75.0],
+  ['anthropic/claude-opus-5', 90.0],
+  ['anthropic/claude-sonnet-4.5', 15.0],
+  ['anthropic/claude-sonnet-4.6', 15.0],
+  ['anthropic/claude-sonnet-5', 20.0],
+  ['deepseek/deepseek-v4-pro', 2.0],
+  ['google/gemini-2.5-flash', 2.5],
+  ['google/gemini-2.5-flash-lite', 0.4],
+  ['google/gemini-2.5-pro', 10.0],
+  ['google/gemini-3-flash', 3.0],
+  ['google/gemini-3.1-flash-lite', 0.5],
+  ['google/gemini-3.1-pro', 12.0],
+  ['google/gemini-3.5-flash', 3.0],
+  ['google/gemini-3.5-flash-lite', 0.6],
+  ['google/gemini-3.6-flash', 3.0],
+  ['minimax/m2.7', 2.0],
+  ['minimax/m3', 3.0],
+  ['moonshotai/kimi-k3', 3.0],
+  ['openai/gpt-4.1', 8.0],
+  ['openai/gpt-4.1-mini', 1.6],
+  ['openai/gpt-4.1-nano', 0.4],
+  ['openai/gpt-4o', 10.0],
+  ['openai/gpt-4o-mini', 0.6],
+  ['openai/gpt-5', 10.0],
+  ['openai/gpt-5-mini', 2.0],
+  ['openai/gpt-5-nano', 0.4],
+  ['openai/gpt-5.1', 10.0],
+  ['openai/gpt-5.4', 12.0],
+  ['openai/gpt-5.4-mini', 2.4],
+  ['openai/gpt-5.4-nano', 0.5],
+  ['openai/gpt-5.4-pro', 60.0],
+  ['openai/gpt-5.5', 14.0],
+  ['openai/gpt-5.5-pro', 70.0],
+  ['openai/gpt-5.6-luna', 15.0],
+  ['openai/gpt-5.6-sol', 15.0],
+  ['openai/gpt-5.6-terra', 15.0],
+  ['openai/o3', 40.0],
+  ['openai/o3-mini', 4.4],
+  ['openai/o4-mini', 4.4],
+  ['thinkingmachines/inkling', 2.0],
+  ['thinkingmachines/inkling-256k', 4.0],
+  ['xai/grok-4.20-0309-non-reasoning', 5.0],
+  ['xai/grok-4.20-0309-reasoning', 15.0],
+  ['xai/grok-4.20-multi-agent-0309', 20.0],
+  ['xai/grok-4.3', 8.0],
+  ['xai/grok-4.5', 10.0],
+]
+
+function nameFromId(id: string): string {
+  const last = id.split('/').pop() || id
+  return last
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+const TEXT_MODELS: CatalogModel[] = TEXT_MODEL_PRICES.map(([id, price]) => ({
+  id,
+  price,
+  task: 'chat' as Task,
+  name: nameFromId(id),
+  description: id.startsWith('@')
+    ? 'Text generation on Workers AI.'
+    : 'Text generation via Cloudflare Unified Billing.',
+}))
+
 function slugify(id: string): string {
   return id.replace(/^@/, '').replace(/[/.]/g, '-').toLowerCase()
 }
 
 function toRow(m: CatalogModel) {
   const isVideo = m.task === 't2v' || m.task === 'i2v'
-  const isWorkersAI = m.id.startsWith('@cf/')
+  const isText = m.task === 'chat'
   const usesImageInput = m.task === 'i2i' || m.task === 'i2v'
 
-  const capabilities: Record<string, any> = {
-    supportsImage: usesImageInput || Boolean(m.capabilities?.supportsImageToImage),
-    supportsMask: false,
-    supportsQuality: false,
-    ...(isVideo
-      ? { supportsTextToVideo: m.task === 't2v', supportsImageToVideo: usesImageInput || m.task === 't2v' }
-      : { supportsTextToImage: m.task === 't2i', supportsImageToImage: usesImageInput }),
-    ...m.capabilities,
-  }
+  const capabilities: Record<string, any> = isText
+    ? { supportsChat: true, ...m.capabilities }
+    : {
+        supportsImage: usesImageInput || Boolean(m.capabilities?.supportsImageToImage),
+        supportsMask: false,
+        supportsQuality: false,
+        ...(isVideo
+          ? { supportsTextToVideo: m.task === 't2v', supportsImageToVideo: usesImageInput || m.task === 't2v' }
+          : { supportsTextToImage: m.task === 't2i', supportsImageToImage: usesImageInput }),
+        ...m.capabilities,
+      }
 
   return {
     id: m.id,
     name: m.name,
     slug: slugify(m.id),
-    type: (isVideo ? 'video' : 'image') as 'image' | 'video',
+    type: (isText ? 'text' : isVideo ? 'video' : 'image') as 'image' | 'video' | 'text',
     status: 'active' as const,
     isPublic: true,
 
@@ -153,9 +279,10 @@ function toRow(m: CatalogModel) {
         pricing: {
           type: 'fixed',
           value: m.price, // ESTIMATE - verify in Cloudflare dashboard
+          ...(isText && { unit: 'per_1m_tokens' }),
         },
         maxRetries: isVideo ? 1 : 2,
-        timeoutSeconds: isVideo ? 600 : 180,
+        timeoutSeconds: isVideo ? 600 : 120,
         ...m.provider,
       },
     ]),
@@ -170,9 +297,11 @@ function toRow(m: CatalogModel) {
       isVideo ? 'video' : 'image',
       ...(m.tags || []),
     ]),
-    category: isVideo
-      ? (m.task === 'i2v' ? 'image-to-video' : 'text-to-video')
-      : (m.task === 'i2i' ? 'image-to-image' : 'text-to-image'),
+    category: isText
+      ? 'text-generation'
+      : isVideo
+        ? (m.task === 'i2v' ? 'image-to-video' : 'text-to-video')
+        : (m.task === 'i2i' ? 'image-to-image' : 'text-to-image'),
 
     examples: JSON.stringify([]),
   }
@@ -195,6 +324,6 @@ function toInsertSQL(m: CatalogModel): string {
   return `INSERT INTO models (${cols}) VALUES (${vals}) ON CONFLICT(id) DO UPDATE SET name=excluded.name, providers=excluded.providers, capabilities=excluded.capabilities, description=excluded.description, status=excluded.status, tags=excluded.tags, category=excluded.category;`
 }
 
-const all = [...IMAGE_MODELS, ...VIDEO_MODELS]
+const all = [...IMAGE_MODELS, ...VIDEO_MODELS, ...TEXT_MODELS]
 writeFileSync('drizzle/seed-cloudflare-models.sql', all.map(toInsertSQL).join('\n') + '\n')
-console.log(`Wrote ${all.length} model inserts (${IMAGE_MODELS.length} image, ${VIDEO_MODELS.length} video) to drizzle/seed-cloudflare-models.sql`)
+console.log(`Wrote ${all.length} model inserts (${IMAGE_MODELS.length} image, ${VIDEO_MODELS.length} video, ${TEXT_MODELS.length} text) to drizzle/seed-cloudflare-models.sql`)

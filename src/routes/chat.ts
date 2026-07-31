@@ -188,30 +188,29 @@ chat.post('/completions', async (c) => {
   }
 })
 
-// GET /v1/chat/models - List available chat models
+// GET /v1/chat/models - List available chat models (from DB, type='text')
 chat.get('/models', async (c) => {
-  const models = [
-    // Workers AI models (billed via Workers AI pricing)
-    { id: '@cf/meta/llama-3.1-8b-instruct-fast', provider: 'workers-ai', description: 'Llama 3.1 8B - Fast' },
-    { id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', provider: 'workers-ai', description: 'Llama 3.3 70B - Fast' },
-    { id: '@cf/openai/gpt-oss-120b', provider: 'workers-ai', description: 'GPT-OSS 120B' },
-    { id: '@cf/qwen/qwen2.5-coder-32b-instruct', provider: 'workers-ai', description: 'Qwen 2.5 Coder 32B' },
-    // Third-party catalog models (billed via Cloudflare Unified Billing)
-    { id: 'openai/gpt-4.1-mini', provider: 'unified-billing', description: 'GPT-4.1 Mini via Cloudflare' },
-    { id: 'anthropic/claude-sonnet-4-5', provider: 'unified-billing', description: 'Claude Sonnet 4.5 via Cloudflare' },
-    { id: 'google/gemini-2.5-flash', provider: 'unified-billing', description: 'Gemini 2.5 Flash via Cloudflare' },
-  ]
+  const { ModelService } = await import('../services/modelService')
+  const db = c.get('db')
+  const modelService = new ModelService(db)
 
-  return c.json({
-    object: 'list',
-    data: models.map(m => ({
-      id: m.id,
-      object: 'model',
-      created: Math.floor(Date.now() / 1000),
-      owned_by: m.provider,
-      description: m.description,
-    }))
-  })
+  try {
+    const models = await modelService.listModels({ status: 'active', type: 'text', isPublic: true })
+
+    return c.json({
+      object: 'list',
+      data: models.map((m: any) => ({
+        id: m.id,
+        object: 'model',
+        created: Math.floor(Date.now() / 1000),
+        owned_by: m.id.startsWith('@') ? 'workers-ai' : 'unified-billing',
+        description: m.description,
+      }))
+    })
+  } catch (error) {
+    console.error('Error fetching chat models:', error)
+    return c.json({ error: { message: 'Failed to fetch models', type: 'internal_error' } }, 500)
+  }
 })
 
 export default chat

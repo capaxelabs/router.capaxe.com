@@ -12,7 +12,7 @@ app.get('/', async (c) => {
   const db = c.get('db')
   const modelService = new ModelService(db)
 
-  const type = c.req.query('type') as 'image' | 'video' | undefined
+  const type = c.req.query('type') as 'image' | 'video' | 'text' | undefined
   const status = c.req.query('status') as 'active' | 'inactive' | 'deprecated' | 'beta' | undefined
   const provider = c.req.query('provider')
 

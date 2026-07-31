@@ -68,7 +68,7 @@ export const models = sqliteTable('models', {
   id: text('id').primaryKey(), // 'google/gemini-2.5-flash'
   name: text('name').notNull(), // 'Gemini 2.5 Flash'
   slug: text('slug').notNull().unique(), // 'gemini-25-flash'
-  type: text('type', { enum: ['image', 'video'] }).notNull(),
+  type: text('type', { enum: ['image', 'video', 'text'] }).notNull(),
   
   // Status & Visibility
   status: text('status', { 
