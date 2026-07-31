@@ -20,6 +20,7 @@ export const ModelsList = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('default');
 
   useEffect(() => {
     fetch('/v1/models')
@@ -38,6 +39,9 @@ export const ModelsList = () => {
       });
   }, []);
 
+  const priceOf = (m) => m.providers?.[0]?.pricing?.value || 0;
+  const nameOf = (m) => m.name || m.id;
+
   const filteredModels = models?.filter(m => {
     if (filter !== 'all' && m.type !== filter) return false;
     if (search) {
@@ -45,6 +49,14 @@ export const ModelsList = () => {
       return m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q);
     }
     return true;
+  }).sort((a, b) => {
+    switch (sort) {
+      case 'name-asc': return nameOf(a).localeCompare(nameOf(b));
+      case 'name-desc': return nameOf(b).localeCompare(nameOf(a));
+      case 'price-asc': return priceOf(a) - priceOf(b);
+      case 'price-desc': return priceOf(b) - priceOf(a);
+      default: return 0;
+    }
   });
 
   return html`
@@ -73,6 +85,18 @@ export const ModelsList = () => {
           <option value="image">Image</option>
           <option value="video">Video</option>
           <option value="text">Text</option>
+        </select>
+
+        <select
+          value=${sort}
+          onChange=${(e) => setSort(e.target.value)}
+          class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-500 outline-none"
+        >
+          <option value="default">Sort: Default</option>
+          <option value="name-asc">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="price-asc">Price ↑</option>
+          <option value="price-desc">Price ↓</option>
         </select>
       </div>
 
