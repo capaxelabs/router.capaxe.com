@@ -82,7 +82,10 @@ app.route('/v1/chat', chatRoutes)
 // Tasks web page for viewing all tasks
 app.route('/tasks', tasksPage)
 
-// app.route('/playground', playgroundRoutes)
+// Admin: model CRUD (used by the admin panel UI) + API call audit log
+import adminRoutes from './routes/admin'
+app.route('/admin', playgroundRoutes)
+app.route('/admin', adminRoutes)
 
 // Placeholder routes for authentication (future implementation)
 // app.route('/v1/auth', authRoutes)

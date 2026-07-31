@@ -225,6 +225,123 @@ const ModelEditor = ({ model, onClose, onSave, adminKey }) => {
   `;
 };
 
+const CallsViewer = ({ adminKey }) => {
+  const [calls, setCalls] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [typeFilter, setTypeFilter] = useState('');
+  const [expanded, setExpanded] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/admin/calls?limit=100' + (typeFilter ? `&type=${typeFilter}` : ''), {
+        headers: { 'Authorization': `Bearer ${adminKey}` }
+      });
+      const data = await res.json();
+      if (data.success) setCalls(data.calls);
+    } catch (err) {
+      console.error('Failed to load calls:', err);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [typeFilter]);
+
+  const typeOf = (taskId) =>
+    taskId?.startsWith('chat_') ? 'chat'
+    : taskId?.startsWith('img_') ? 'image'
+    : taskId?.startsWith('vid_') ? 'video'
+    : 'other';
+  const badge = {
+    chat: 'bg-purple-100 text-purple-700',
+    image: 'bg-blue-100 text-blue-700',
+    video: 'bg-green-100 text-green-700',
+    other: 'bg-gray-100 text-gray-600'
+  };
+
+  const fmtCost = (c) => c ? `$${c.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}` : '$0';
+  const fmtTime = (t) => t ? new Date(t).toLocaleString() : '';
+
+  return html`
+    <div class="bg-white rounded-xl shadow-lg p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <h2 class="text-lg font-bold text-gray-800 mr-auto">
+          API Calls
+          ${calls && html`<span class="ml-2 text-sm font-normal text-gray-400">${calls.length}</span>`}
+        </h2>
+        <select
+          value=${typeFilter}
+          onChange=${e => setTypeFilter(e.target.value)}
+          class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none"
+        >
+          <option value="">All</option>
+          <option value="chat">Chat</option>
+          <option value="img">Image</option>
+          <option value="vid">Video</option>
+        </select>
+        <button onClick=${load} class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium">
+          Refresh
+        </button>
+      </div>
+
+      ${loading && html`<div class="text-center py-8"><div class="spinner"></div></div>`}
+
+      ${!loading && calls && html`
+        <div class="divide-y divide-gray-100">
+          ${calls.map(call => html`
+            <div key=${call.id}>
+              <div
+                class="flex items-center gap-3 py-1.5 px-2 hover:bg-gray-50 rounded cursor-pointer text-sm"
+                onClick=${() => setExpanded(expanded === call.id ? null : call.id)}
+              >
+                <span class="shrink-0 w-12 text-center px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase ${badge[typeOf(call.taskId)]}">
+                  ${typeOf(call.taskId)}
+                </span>
+                <span class="font-mono text-gray-800 truncate shrink-0 max-w-[16rem]">${call.model}</span>
+                <span class="text-gray-500 truncate">${call.prompt}</span>
+                <span class="ml-auto shrink-0 text-xs ${
+                  call.status === 'success' ? 'text-green-600'
+                  : call.status === 'error' || call.status === 'failed' ? 'text-red-600'
+                  : 'text-gray-400'
+                }">${call.status || call.taskStatus}</span>
+                <span class="shrink-0 font-mono text-xs text-green-700 w-16 text-right">${fmtCost(call.cost)}</span>
+                <span class="shrink-0 text-xs text-gray-400 w-12 text-right">${call.speedMs ? (call.speedMs / 1000).toFixed(1) + 's' : ''}</span>
+                <span class="shrink-0 text-xs text-gray-400 hidden lg:inline w-40 text-right">${fmtTime(call.createdAt)}</span>
+              </div>
+
+              ${expanded === call.id && html`
+                <div class="bg-gray-50 rounded-lg p-3 mb-2 text-xs space-y-2">
+                  ${call.error && html`<div class="text-red-600"><b>Error:</b> ${call.error}</div>`}
+                  ${call.outputUrls?.length > 0 && html`
+                    <div>
+                      <b>Output:</b>
+                      ${call.outputUrls.map(u => html`
+                        <a href=${u} target="_blank" class="text-blue-600 underline mr-2 break-all">${u}</a>
+                      `)}
+                    </div>
+                  `}
+                  <div>
+                    <b>Request</b>
+                    <pre class="mt-1 p-2 bg-white border border-gray-200 rounded overflow-x-auto max-h-64">${JSON.stringify(call.metadata?.request || call.metadata?.originalRequest || null, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <b>Response</b>
+                    <pre class="mt-1 p-2 bg-white border border-gray-200 rounded overflow-x-auto max-h-64">${JSON.stringify(call.metadata?.response || null, null, 2)}</pre>
+                  </div>
+                  ${call.metadata?.usage && html`
+                    <div><b>Usage:</b> <span class="font-mono">${JSON.stringify(call.metadata.usage)}</span></div>
+                  `}
+                </div>
+              `}
+            </div>
+          `)}
+          ${calls.length === 0 && html`<p class="text-center text-gray-400 py-8 text-sm">No calls yet</p>`}
+        </div>
+      `}
+    </div>
+  `;
+};
+
 export const AdminPanel = () => {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -233,6 +350,7 @@ export const AdminPanel = () => {
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [filters, setFilters] = useState({ type: '', status: '', search: '' });
+  const [tab, setTab] = useState('models');
 
   const connect = async () => {
     if (!adminKey) return;
@@ -355,8 +473,18 @@ export const AdminPanel = () => {
     `;
   }
 
+  const tabClass = (t) => `px-4 py-2 rounded-lg text-sm font-medium transition ${
+    tab === t ? 'bg-purple-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
+  }`;
+
   return html`
     <div>
+      <div class="flex gap-2 mb-6">
+        <button onClick=${() => setTab('models')} class=${tabClass('models')}>Models</button>
+        <button onClick=${() => setTab('calls')} class=${tabClass('calls')}>API Calls</button>
+      </div>
+
+      ${tab === 'calls' ? html`<${CallsViewer} adminKey=${adminKey} />` : html`
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-2xl font-bold text-gray-800">Model Management</h2>
         <div class="flex gap-3">
@@ -510,6 +638,7 @@ export const AdminPanel = () => {
             </tbody>
           </table>
         </div>
+      `}
       `}
     </div>
 
