@@ -406,3 +406,92 @@ curl -X POST http://localhost:8787/v1/videos/generations \
 1. Add a new entry to `drizzle/seed-replicate-models.ts` with `providers: [{ id: 'replicate', model_name: 'owner/model-name', ... }]`
 2. Run `pnpm run db:seed-replicate`
 3. No code changes needed — the handler passes through model-specific input params automatically
+
+---
+
+## Cloudflare AI Gateway (2026-07-30)
+
+### Features
+- [x] Route provider calls through Cloudflare AI Gateway (opt-in via `CF_AI_GATEWAY_ACCOUNT_ID` + `CF_AI_GATEWAY_ID`, optional `CF_AI_GATEWAY_TOKEN` for authenticated gateways; falls back to direct provider calls when unset)
+  - [x] Gemini image generation (`imageService.ts`) via `google-ai-studio`
+  - [x] Vertex AI image + video (`imageService.ts`, `videoService.ts`) via `google-vertex-ai`
+  - [x] Veo video via `@google/genai` SDK `httpOptions.baseUrl` (`videoService.ts`)
+  - [x] Chat proxy OpenAI/Anthropic/Gemini (`chat.ts`)
+  - [x] Replicate via client `baseUrl` (`replicateService.ts`)
+- [ ] Create the gateway in the Cloudflare dashboard and set `CF_AI_GATEWAY_ACCOUNT_ID`/`CF_AI_GATEWAY_ID` as Worker vars (deploy step, not code)
+- [ ] Runware is not an AI Gateway provider — optionally add it as an AI Gateway custom provider later
+
+## Audit Findings (2026-07-30)
+
+### Bug fixes — Critical
+- [ ] `queueService.ts:389` `createQueueService` passes constructor args swapped (`new QueueService(queue, db)` vs `constructor(db, queue)`) — breaks all async HTTP endpoints
+- [ ] No credit check/deduction in live path — generation is free; billing code (`generationWrapper.ts`/`usageLogger.ts`) is dead code and itself broken (undeclared `modelConfig`, stale-balance writes, race conditions)
+- [ ] `queueConsumer.ts` has no idempotency guard — queue retries re-run full generation and re-bill
+- [ ] Unauthenticated `/tasks` HTML page leaks all users' prompts/URLs/task IDs (`tasksPage.ts`)
+- [ ] IDOR: `GET`/`DELETE /v1/tasks/:taskId` has no ownership check (`tasks.ts`)
+- [ ] Unauthenticated `/v1/videos/proxy` spends platform Gemini key on attacker-chosen Google API paths (`videos.ts:156`)
+- [ ] Rotate `ADMIN_API_KEY` — committed in `docs/api/environments/production.bru`; also remove seeded test API key from any real DB (`src/db/seed.ts`)
+
+### Bug fixes — High
+- [ ] `queueService.ts:287` `getUserTasks` chains `.where()` 3x — Drizzle keeps only the last, dropping the userId filter (cross-tenant leak)
+- [ ] `queueService.ts:66` `createAsyncTask` drops base64 `imagesData` — image-edit/i2v silently run as text-to-image/video
+- [ ] Veo billing: hardcoded $3.20 in `queueConsumer.ts:485` (charged even on error path); inline-completed Veo bills $0
+- [ ] Task cancel races with completion — `completeTask` overwrites cancelled status
+- [ ] Chat proxy has no billing/usage logging; unknown models default to OpenAI
+- [ ] `/v1/runware/*` catalog endpoints unauthenticated
+- [ ] Rate limiting keys off spoofable `x-forwarded-for` (set `PROXY_COUNT` or always use `cf-connecting-ip`)
+- [ ] `ENVIRONMENT=development` in deployed `wrangler.jsonc` returns stack traces to clients
+
+### Bug fixes — Medium/Low
+- [ ] SSRF: `image` param fetched server-side with no URL validation (`validation.ts:49`, `queueConsumer.ts:89`)
+- [ ] Orphaned pending tasks: DB row inserted before `queue.send`; no reaper/timeout sweep
+- [ ] DLQ `imagerouter-failed-tasks` has no consumer; `handleFailedMessages` unreachable
+- [ ] R2 upload failures swallowed — tasks complete with `[null]` or expiring provider URLs (`storage.ts:321`, `videoService.ts:556`)
+- [ ] CALCULATED/POST_GENERATION pricing never wired to DB models (`modelService.ts:330`, `priceCalculator.ts:52`)
+- [ ] JWTs without `exp` never expire (`apiKeyMiddleware.ts:50`)
+- [ ] Veo model coerced by substring, ignores DB `model_name` (`videoService.ts:139`)
+- [ ] XSS-prone unescaped interpolation in `/tasks` page (currently blocked by CSP)
+- [ ] Unescaped `c.req.json()` before validation returns 500 instead of 400 (`images.ts:27`, `videos.ts:22`)
+
+### Refactoring (dead code / drift)
+- [ ] Delete orphaned services: `durableObjectProcessor.ts`, `queueProcessor.ts`, `taskManager.ts`, `webhookProcessor.ts`, `asyncTaskDatabase.ts`, `replicateUtils.ts`, `openapiDoc.ts`, `schema-async.ts`
+- [ ] Decide fate of dead billing pair `generationWrapper.ts` + `usageLogger.ts` (fix + wire in, or delete)
+- [ ] `playground.ts` (admin CRUD) is bundled but its mount is commented out in `index.ts` — admin API doesn't exist at runtime
+- [ ] `db:seed-models` script imports deleted `src/shared/imageModels/`/`videoModels/` dirs — crashes
+- [ ] Phantom env types (`DB: D1Database`, `VERTEX_API_KEY`, `FAL_API_KEY`, `WAVESPEED_API_KEY`, `RATE_LIMIT_REDIS`); unused `STORAGE_BUCKET` binding
+- [ ] `.dev.vars.example` missing `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`
+- [ ] Inconsistent error/response envelopes across routes; triplicated error-recovery block in `images.ts`/`videos.ts`
+- [ ] `packages/sdk` not in any workspace, drifted from API (sends unsupported `aspect_ratio`)
+
+### Documentation
+- [ ] CLAUDE.md says "Google and Runware only" but Replicate is fully wired in — update docs or remove provider
+
+---
+
+## Cloudflare AI-Only Migration (2026-07-31)
+
+Supersedes the "Cloudflare AI Gateway (2026-07-30)" section above: direct provider calls (and the per-provider gateway URL helper `src/lib/aiGateway.ts`) were replaced entirely by the `env.AI` binding.
+
+### Features
+- [x] All inference now goes through the Cloudflare AI binding (`env.AI.run()`) + AI Gateway (`CF_AI_GATEWAY_ID`, defaults to `default`)
+  - [x] `src/services/cloudflareAI.ts` — `runModel()` wrapper with gateway option + catalog `state` handling
+  - [x] Images: Workers AI models (`@cf/...`, base64/binary) and catalog models (`google/imagen-4`, URL) normalized in `imageService.ts`
+  - [x] Videos: catalog models (`google/veo-3.1`, `bytedance/seedance-2.0-mini`) in `videoService.ts`; binding waits for completion, URL re-uploaded to R2 — Google operation-polling machinery removed
+  - [x] Chat: `chat.ts` rewritten to `env.AI.run()` (streaming + non-streaming, OpenAI-compatible output kept)
+  - [x] `wrangler.jsonc` AI binding added; `worker-configuration.d.ts` regenerated
+  - [x] Seed script `drizzle/seed-cloudflare-models.ts` (`npm run db:seed-cloudflare`)
+- [ ] Run `npm run db:seed-cloudflare` against the production DB, then deactivate old google/*, runware/*, replicate/* model rows (`status != 'active'`)
+- [ ] Enable Unified Billing credits in the Cloudflare dashboard (required for third-party catalog models)
+- [ ] Verify seed pricing values against the Cloudflare model catalog before charging users
+
+### Removed
+- [x] Gemini/Vertex (`googleAuth.ts`, `@google/genai`), Runware (`runwareService.ts`, `/v1/runware/*` routes, `@runware/sdk-js`), Replicate (`replicateService.ts`, `replicateUtils.ts`, `replicate`), OpenAI/Anthropic direct chat callers
+- [x] Unauthenticated `/v1/videos/proxy` endpoint (Gemini-key leak; obsolete — all outputs live in R2)
+- [x] All provider API keys from `types/env.ts` and `.dev.vars.example`
+
+### Bug fixes
+- [x] `createQueueService` constructor arg swap fixed (`queueService.ts:389`) — async HTTP endpoints work again
+- [x] Video R2 upload failures now throw instead of silently storing ephemeral provider URLs
+
+### Notes
+- Audit findings from 2026-07-30 above still apply except: video proxy (removed), constructor swap (fixed), Veo polling issues (machinery removed), Replicate/CLAUDE.md contradiction (resolved — CLAUDE.md updated)

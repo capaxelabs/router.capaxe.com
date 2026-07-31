@@ -5,8 +5,7 @@
 
 import { createDatabase, Database } from '../db'
 import { CloudflareBindings } from '../types/env'
-import { QueueMessage, QueueService, createPollingMessage } from './queueService'
-import { getGeminiApiKey } from './googleAuth'
+import { QueueMessage, QueueService } from './queueService'
 
 /**
  * Process a batch of queue messages
@@ -143,9 +142,6 @@ async function processQueueMessage(
       result = await processImageTask(request, task.userId, env, queueService, taskId, db)
     } else if (type === 'video') {
       result = await processVideoTask(request, task.userId, env, queueService, taskId, db)
-    } else if (type === 'video_poll') {
-      result = await processVideoPollTask(message.body, env, queueService)
-      return // Don't complete the task yet, just poll
     } else {
       throw new Error(`Unknown task type: ${type}`)
     }
@@ -164,39 +160,10 @@ async function processQueueMessage(
 
   } catch (error) {
     console.error(`Task ${taskId} processing failed:`, error)
-    
-    // Check if this is a Google operation that needs continued polling
+
     const errorMessage = error instanceof Error ? error.message : String(error)
-    const operationMatch = errorMessage.match(/Operation: (.*?)\. /)
-    
-    if (operationMatch && errorMessage.includes('still in progress')) {
-      const googleOperationName = operationMatch[1]
-      console.log(`Video still processing, starting polling for operation: ${googleOperationName}`)
-      
-      // Create initial polling message
-      await createPollingMessage(
-        env.ASYNC_QUEUE,
-        taskId,
-        userId,
-        message.body.usageId,
-        'google',
-        googleOperationName,
-        1,
-        40,
-        30
-      )
-      
-      // Update task to show it's polling
-      await queueService.updateTaskProgress(taskId, {
-        taskStatus: 'processing',
-        taskProgress: 30,
-        provider: 'google-veo'
-      })
-      
-      return // Don't mark as failed, polling will continue
-    }
-    
-    // Mark task as failed for other errors
+
+    // Mark task as failed
     await queueService.completeTask(taskId, {
       outputUrls: [],
       cost: 0,
@@ -253,7 +220,7 @@ async function processImageTask(
   // Update progress
   await queueService.updateTaskProgress(taskId, {
     taskProgress: 30,
-    provider: 'google' // Assuming Google provider
+    provider: 'workers-ai'
   })
 
   // Run the actual image generation
@@ -309,7 +276,7 @@ async function processVideoTask(
   // Update progress
   await queueService.updateTaskProgress(taskId, {
     taskProgress: 20,
-    provider: 'google'
+    provider: 'workers-ai'
   })
 
   // Run the actual video generation
@@ -363,213 +330,3 @@ export async function handleFailedMessages(
   }
 }
 
-/**
- * Process a video polling task (supports any provider)
- */
-async function processVideoPollTask(
-  message: QueueMessage,
-  env: CloudflareBindings,
-  queueService: QueueService
-): Promise<void> {
-  const { taskId, userId, usageId, pollingData } = message
-
-  if (!pollingData) {
-    throw new Error('No polling data provided for video poll task')
-  }
-
-  const { provider, operationId, pollAttempt, maxPollAttempts, pollInterval = 30 } = pollingData
-
-  // Route to provider-specific polling handler (only Google supported)
-  switch (provider) {
-    case 'google':
-      await pollGoogleOperation(message, env, queueService)
-      break
-    default:
-      throw new Error(`Unsupported polling provider: ${provider}. Only 'google' is supported.`)
-  }
-}
-
-/**
- * Poll Google Veo operation status
- */
-async function pollGoogleOperation(
-  message: QueueMessage,
-  env: CloudflareBindings,
-  queueService: QueueService
-): Promise<void> {
-  const { taskId, userId, usageId, pollingData } = message
-  
-  if (!pollingData) {
-    throw new Error('No polling data provided')
-  }
-
-  const { operationId, pollAttempt, maxPollAttempts, pollInterval = 30 } = pollingData
-
-  // Import Google GenAI SDK
-  const { GoogleGenAI } = await import('@google/genai')
-  const providerKey = getGeminiApiKey('veo', env)
-
-  if (!providerKey) {
-    throw new Error('Google API key not configured')
-  }
-
-  const ai = new GoogleGenAI({ apiKey: providerKey })
-
-  try {
-    // Check operation status
-    const operation = await ai.operations.getVideosOperation({ 
-      operation: { name: operationId } 
-    })
-
-    console.log(`Polling Google task ${taskId}, attempt ${pollAttempt}/${maxPollAttempts}, done: ${operation.done}`)
-
-    if (operation.done) {
-      // Operation completed - process the result
-      if (operation.error) {
-        // Failed
-        await queueService.completeTask(taskId, {
-          outputUrls: [],
-          cost: 0,
-          speedMs: Date.now() - (message.timestamp || Date.now()),
-          provider: 'google-veo',
-          status: 'error',
-          error: `Google Veo generation failed: ${JSON.stringify(operation.error)}`
-        })
-        console.log(`Task ${taskId} failed: ${JSON.stringify(operation.error)}`)
-      } else {
-        // Success - download and process video
-        const videoData = operation.response?.generatedVideos?.[0]
-        if (videoData?.videoUri) {
-          try {
-            const videoResponse = await fetch(videoData.videoUri, {
-              headers: { 'x-goog-api-key': providerKey }
-            })
-            
-            let outputUrls: string[] = []
-            if (videoResponse.ok) {
-              console.log(`[Queue Video] Video download successful, preparing R2 upload...`)
-              console.log(`[Queue Video] Environment check - R2_ACCOUNT_ID: ${env.R2_ACCOUNT_ID || 'MISSING'}, R2_BUCKET_NAME: ${env.R2_BUCKET_NAME || 'MISSING'}, R2_CUSTOM_PUBLIC_URL: ${env.R2_CUSTOM_PUBLIC_URL || 'MISSING'}`)
-              
-              // Upload video to R2 instead of storing as base64
-              const { createStorageService } = await import('../lib/storage')
-              const storageService = createStorageService(
-                env.R2_ACCOUNT_ID,
-                env.R2_ACCESS_KEY_ID,
-                env.R2_SECRET_ACCESS_KEY,
-                env.R2_BUCKET_NAME,
-                env.R2_CUSTOM_PUBLIC_URL
-              )
-              
-              if (!storageService) {
-                throw new Error('Storage service not configured - cannot upload video')
-              }
-              
-              console.log(`[Queue Video] Uploading video from ${videoData.videoUri}`)
-              const videoBuffer = await videoResponse.arrayBuffer()
-              console.log(`[Queue Video] Video buffer size: ${videoBuffer.byteLength} bytes`)
-              
-              const uploadResult = await storageService.downloadAndUpload(
-                videoData.videoUri,
-                'video/mp4',
-                'video'
-              )
-              
-              outputUrls = [uploadResult.url]
-              console.log(`[Queue Video] ✓ Successfully uploaded video to R2: ${uploadResult.url}`)
-            } else {
-              console.error(`[Queue Video] Video response not OK: ${videoResponse.status} ${videoResponse.statusText}`)
-            }
-
-            await queueService.completeTask(taskId, {
-              outputUrls,
-              cost: Math.round(3.2 * 10000), // $3.20 in 1e-4 USD units
-              speedMs: Date.now() - (message.timestamp || Date.now()),
-              provider: 'google-veo',
-              status: 'success'
-            })
-            console.log(`Task ${taskId} completed successfully`)
-          } catch (downloadError) {
-            console.error(`Failed to download video for task ${taskId}:`, downloadError)
-            await queueService.completeTask(taskId, {
-              outputUrls: [],
-              cost: Math.round(3.2 * 10000),
-              speedMs: Date.now() - (message.timestamp || Date.now()),
-              provider: 'google-veo',
-              status: 'error',
-              error: 'Failed to download generated video'
-            })
-          }
-        } else {
-          await queueService.completeTask(taskId, {
-            outputUrls: [],
-            cost: 0,
-            speedMs: Date.now() - (message.timestamp || Date.now()),
-            provider: 'google-veo',
-            status: 'error',
-            error: 'No video URI in completed Google operation'
-          })
-        }
-      }
-    } else {
-      // Still processing - check if we should continue polling
-      if (pollAttempt >= maxPollAttempts) {
-        // Max attempts reached - mark as failed
-        await queueService.completeTask(taskId, {
-          outputUrls: [],
-          cost: 0,
-          speedMs: Date.now() - (message.timestamp || Date.now()),
-          provider: 'google-veo',
-          status: 'error',
-          error: `Video generation timed out after ${maxPollAttempts} polling attempts (${Math.round(maxPollAttempts * 30 / 60)} minutes)`
-        })
-        console.log(`Task ${taskId} timed out after ${pollAttempt} attempts`)
-      } else {
-        // Continue polling - re-queue with delay
-        await createPollingMessage(
-          env.ASYNC_QUEUE,
-          taskId,
-          userId,
-          usageId,
-          'google',
-          operationId,
-          pollAttempt + 1,
-          maxPollAttempts,
-          pollInterval
-        )
-
-        // Update progress
-        const progressPercent = Math.min(90, 10 + (pollAttempt * 2)) // Gradual progress increase
-        await queueService.updateTaskProgress(taskId, {
-          taskProgress: progressPercent
-        })
-      }
-    }
-  } catch (error) {
-    console.error(`Error polling Google operation for task ${taskId}:`, error)
-    
-    // If this is not the last attempt, continue polling
-    if (pollAttempt < maxPollAttempts) {
-      await createPollingMessage(
-        env.ASYNC_QUEUE,
-        taskId,
-        userId,
-        usageId,
-        'google',
-        operationId,
-        pollAttempt + 1,
-        maxPollAttempts,
-        pollInterval
-      )
-    } else {
-      // Mark as failed
-      await queueService.completeTask(taskId, {
-        outputUrls: [],
-        cost: 0,
-        speedMs: Date.now() - (message.timestamp || Date.now()),
-        provider: 'google-veo',
-        status: 'error',
-        error: `Polling failed: ${error instanceof Error ? error.message : String(error)}`
-      })
-    }
-  }
-}

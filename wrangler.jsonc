@@ -10,6 +10,9 @@
   "assets": {
     "directory": "public"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
     "ENVIRONMENT": "development",
     "R2_BUCKET_NAME": "imagerouter",

@@ -8,7 +8,7 @@ ImageRouter is a unified proxy API providing OpenAI-compatible endpoints for AI 
 
 **Stack:** Cloudflare Workers + Hono framework + Drizzle ORM + Turso (libSQL) + R2 storage + Cloudflare Queues
 
-**Providers:** Google (Gemini, Imagen, Veo) and Runware only. All other providers are out of scope.
+**Providers:** Cloudflare AI only. All inference goes through the `env.AI` binding + AI Gateway ([src/services/cloudflareAI.ts](src/services/cloudflareAI.ts)): Workers AI models (`@cf/...`, Workers AI pricing) and third-party catalog models (`{author}/{model}` e.g. `google/veo-3.1`, billed via Cloudflare Unified Billing). No provider API keys. Direct provider integrations (Gemini, Vertex, OpenAI, Anthropic, Runware, Replicate) were removed.
 
 ## Development Commands
 
@@ -66,8 +66,7 @@ Queue messages are intentionally minimal (just `taskId`) to stay within Cloudfla
 | `/v1/videos` | [src/routes/videos.ts](src/routes/videos.ts) | Video generation, proxy, user list |
 | `/v1/tasks` | [src/routes/tasks.ts](src/routes/tasks.ts) | Task status, list, stats, cancel |
 | `/v1/media` | [src/routes/media.ts](src/routes/media.ts) | Unified image+video gallery |
-| `/v1/chat` | [src/routes/chat.ts](src/routes/chat.ts) | OpenAI-compatible chat proxy (OpenAI/Anthropic/Gemini) |
-| `/v1/runware/models` | [src/routes/runware.ts](src/routes/runware.ts) | Runware model catalog search |
+| `/v1/chat` | [src/routes/chat.ts](src/routes/chat.ts) | OpenAI-compatible chat proxy via `env.AI.run()` |
 | `/tasks` | [src/routes/tasksPage.ts](src/routes/tasksPage.ts) | Tasks web UI (HTML) |
 
 Static SPA assets in `public/` are served via Cloudflare Workers Assets (configured in `wrangler.jsonc`).
@@ -100,19 +99,16 @@ Admin endpoints use `ADMIN_API_KEY` header check + in-memory rate limiting (60 r
 - Factory: `createStorageService(...)` returns `null` if credentials are missing
 - All generation output must be uploaded to R2; never return base64 directly
 
-### Google Auth
+### Cloudflare AI
 
-[src/services/googleAuth.ts](src/services/googleAuth.ts) — Two auth paths:
-- **Gemini API** — direct `GEMINI_API_KEY` (supports comma-separated keys with random selection for free-tier models)
-- **Vertex AI** — RS256 JWT signing via Web Crypto API → OAuth2 token exchange, with token caching
+[src/services/cloudflareAI.ts](src/services/cloudflareAI.ts) — `runModel(env, model, inputs)` wraps `env.AI.run()` with the AI Gateway option (`CF_AI_GATEWAY_ID`, defaults to `default`). Catalog models return `{ state, result: {...} }`; non-completed states are surfaced as errors.
 
 ### Service Layer
 
-- [src/services/imageService.ts](src/services/imageService.ts) — `generateImage()`: loads model from DB, selects provider, routes to `generateGemini()` / `generateVertex()` / `generateRunware()`
-- [src/services/videoService.ts](src/services/videoService.ts) — `generateVideo()`: same pattern. Google Veo polls inline for up to 2 minutes, then re-queues `video_poll` messages (30s delay, up to 40 attempts)
+- [src/services/imageService.ts](src/services/imageService.ts) — `generateImage()`: loads model from DB, runs it via `runModel()`, normalizes base64/URL/binary-stream responses
+- [src/services/videoService.ts](src/services/videoService.ts) — `generateVideo()`: runs catalog video models (e.g. `google/veo-3.1`) via `runModel()`; the binding waits for completion and returns a URL which is re-uploaded to R2. No operation polling.
 - [src/services/queueConsumer.ts](src/services/queueConsumer.ts) — Must initialize model cache (`setModelsCache()`) and create a mock Hono context with DB instance before calling generation functions
 - [src/services/queueService.ts](src/services/queueService.ts) — `QueueService` class for task CRUD, polling, and status updates
-- [src/services/runwareService.ts](src/services/runwareService.ts) — Runware REST API wrapper (factory pattern, no singleton)
 - [src/services/usageLogger.ts](src/services/usageLogger.ts) — Logs every generation to `api_usage` table
 
 ### Database Schema
@@ -147,10 +143,7 @@ Cost stored as `cost * 10000` (integer) for precision.
 
 **R2:** `R2_BUCKET_NAME`, `R2_CUSTOM_PUBLIC_URL`, plus `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` for S3 API auth
 
-**Providers:**
-- `GEMINI_API_KEY` — Google Gemini/Imagen (comma-separated for multiple keys)
-- `GOOGLE_SERVICE_ACCOUNT_KEY`, `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_CLOUD_LOCATION` — Vertex AI
-- `RUNWARE_API_KEY` — Runware
+**AI:** the `AI` binding in `wrangler.jsonc` (no API keys). Optional `CF_AI_GATEWAY_ID` to route through a specific AI Gateway (defaults to `default`).
 
 ## Key Patterns to Follow
 

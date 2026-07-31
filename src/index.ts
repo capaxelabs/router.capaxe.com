@@ -53,14 +53,10 @@ import mediaRoutes from './routes/media'
 import playgroundRoutes from './routes/playground'
 import taskRoutes from './routes/tasks'
 import tasksPage from './routes/tasksPage'
-import runwareRoutes from './routes/runware'
 import chatRoutes from './routes/chat'
 
-// Models listing endpoint (Google models only for Phase 2)
+// Models listing endpoint
 app.route('/v1/models', modelsRoutes)
-
-// Runware model search endpoints
-app.route('/v1/runware/models', runwareRoutes)
 
 // Models HTML page at /models
 // app.route('/models', modelsRoutes)

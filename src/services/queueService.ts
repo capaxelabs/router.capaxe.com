@@ -386,7 +386,7 @@ export function createQueueService(
     throw new Error('ASYNC_QUEUE binding not configured in wrangler.jsonc. Please add the queue binding to enable task processing.')
   }
 
-  return new QueueService(queue, db)
+  return new QueueService(db, queue)
 }
 
 /**
