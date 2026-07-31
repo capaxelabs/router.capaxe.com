@@ -25,6 +25,39 @@ interface ChatCompletionRequest {
   stream?: boolean
 }
 
+// Workers AI bills @cf/ models in neurons: $0.011 per 1,000 neurons
+const USD_PER_NEURON = 0.011 / 1000
+
+const roundUsd = (n: number) => Math.round(n * 1e6) / 1e6
+
+/**
+ * Dollar cost for a completion. Exact from neurons for @cf/ models;
+ * estimated from output tokens x the DB per-1M-token price otherwise.
+ */
+function computeCost(
+  usage: any,
+  pricing: { value?: number; unit?: string } | null
+): { cost: number; cost_source: 'neurons' | 'estimated_tokens' } | null {
+  if (!usage) return null
+  if (typeof usage.neurons === 'number') {
+    return { cost: roundUsd(usage.neurons * USD_PER_NEURON), cost_source: 'neurons' }
+  }
+  if (pricing?.unit === 'per_1m_tokens' && typeof pricing.value === 'number' && typeof usage.completion_tokens === 'number') {
+    return { cost: roundUsd((usage.completion_tokens / 1e6) * pricing.value), cost_source: 'estimated_tokens' }
+  }
+  return null
+}
+
+async function getTextModelPricing(c: any, modelId: string): Promise<{ value?: number; unit?: string } | null> {
+  try {
+    const { ModelService } = await import('../services/modelService')
+    const model = await new ModelService(c.get('db')).getModelById(modelId)
+    return (model as any)?.providers?.[0]?.pricing || null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Flatten OpenAI-style content parts to plain text (Workers AI expects strings).
  */
@@ -59,9 +92,10 @@ function toOpenAIResponse(aiResponse: any, model: string): any {
       finish_reason: 'stop',
     }],
     usage: {
-      prompt_tokens: usage.prompt_tokens || 0,
-      completion_tokens: usage.completion_tokens || 0,
-      total_tokens: usage.total_tokens || 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      ...usage,
     },
   }
 }
@@ -113,6 +147,7 @@ chat.post('/completions', async (c) => {
         const reader = (aiStream as ReadableStream).getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        let lastUsage: any = null
 
         while (true) {
           const { done, value } = await reader.read()
@@ -131,6 +166,8 @@ chat.post('/completions', async (c) => {
 
             try {
               const parsed = JSON.parse(data)
+
+              if (parsed.usage) lastUsage = parsed.usage
 
               // Already OpenAI chunk format - pass through
               if (parsed.choices) {
@@ -160,6 +197,12 @@ chat.post('/completions', async (c) => {
           }
         }
 
+        if (lastUsage) {
+          const pricing = typeof lastUsage.neurons === 'number' ? null : await getTextModelPricing(c, model)
+          const costInfo = computeCost(lastUsage, pricing)
+          if (costInfo) lastUsage = { ...lastUsage, ...costInfo }
+        }
+
         await sseStream.writeSSE({
           data: JSON.stringify({
             id: `chatcmpl-${Date.now()}`,
@@ -167,6 +210,7 @@ chat.post('/completions', async (c) => {
             created: Math.floor(Date.now() / 1000),
             model,
             choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            ...(lastUsage && { usage: lastUsage }),
           })
         })
         await sseStream.writeSSE({ data: '[DONE]' })
@@ -175,7 +219,15 @@ chat.post('/completions', async (c) => {
 
     // Non-streaming response
     const aiResponse = await (c.env.AI as any).run(model, inputs, aiRunOptions(c.env))
-    return c.json(toOpenAIResponse(aiResponse, model))
+    const openaiResponse = toOpenAIResponse(aiResponse, model)
+
+    if (openaiResponse.usage) {
+      const pricing = typeof openaiResponse.usage.neurons === 'number' ? null : await getTextModelPricing(c, model)
+      const costInfo = computeCost(openaiResponse.usage, pricing)
+      if (costInfo) Object.assign(openaiResponse.usage, costInfo)
+    }
+
+    return c.json(openaiResponse)
 
   } catch (error: any) {
     console.error('Chat completion error:', error)
