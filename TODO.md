@@ -202,6 +202,8 @@ This document tracks the migration to Hono/Cloudflare Workers, focusing exclusiv
 - [x] Create `DELETE /admin/models/:id` - Soft delete
 - [x] Add bulk import/export endpoints (`POST /admin/models/bulk`)
 - [x] Create simple web UI for model management (`public/admin.html`)
+- [x] Admin login with fixed secret key (`GET /admin/auth/verify`, persistent, logout)
+- [x] Hash-based URL routing for sidebar navigation (`#/images`, `#/admin`, ...)
 
 ### 5.8 Documentation & Cleanup
 - [ ] Update API documentation with model management
