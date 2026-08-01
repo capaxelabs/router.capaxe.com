@@ -342,58 +342,21 @@ const CallsViewer = ({ adminKey }) => {
   `;
 };
 
-export const AdminPanel = () => {
+export const AdminPanel = ({ adminKey }) => {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [connected, setConnected] = useState(false);
-  const [checking, setChecking] = useState(!!localStorage.getItem('adminKey'));
-  const [adminKey, setAdminKey] = useState(localStorage.getItem('adminKey') || '');
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [filters, setFilters] = useState({ type: '', status: '', search: '' });
   const [tab, setTab] = useState('models');
 
-  const login = async (key, silent = false) => {
-    if (!key) return;
+  useEffect(() => { loadModels(); }, []);
 
-    try {
-      const res = await fetch('/admin/auth/verify', {
-        headers: { 'Authorization': `Bearer ${key}` }
-      });
-
-      if (res.ok) {
-        localStorage.setItem('adminKey', key);
-        setConnected(true);
-        loadModels(key);
-      } else {
-        localStorage.removeItem('adminKey');
-        if (!silent) setToast({ message: 'Invalid admin key', type: 'error' });
-      }
-    } catch (err) {
-      if (!silent) setToast({ message: 'Connection failed', type: 'error' });
-    }
-
-    setChecking(false);
-  };
-
-  // Auto-login with the saved key
-  useEffect(() => {
-    const saved = localStorage.getItem('adminKey');
-    if (saved) login(saved, true);
-  }, []);
-
-  const logout = () => {
-    localStorage.removeItem('adminKey');
-    setAdminKey('');
-    setConnected(false);
-    setModels([]);
-  };
-
-  const loadModels = async (key = adminKey) => {
+  const loadModels = async () => {
     setLoading(true);
     try {
       const res = await fetch('/admin/models', {
-        headers: { 'Authorization': `Bearer ${key}` }
+        headers: { 'Authorization': `Bearer ${adminKey}` }
       });
       const data = await res.json();
       if (data.success) {
@@ -463,36 +426,6 @@ export const AdminPanel = () => {
     deprecated: 'bg-red-100 text-red-800'
   };
 
-  if (checking) {
-    return html`<div class="text-center py-24"><div class="spinner"></div></div>`;
-  }
-
-  if (!connected) {
-    return html`
-      <div class="max-w-md mx-auto mt-12">
-        <div class="bg-white rounded-xl shadow-lg p-8">
-          <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Admin Login</h2>
-          <p class="text-gray-600 text-sm text-center mb-6">Enter the admin secret key. You stay logged in until you log out.</p>
-          <input
-            type="password"
-            value=${adminKey}
-            onInput=${e => setAdminKey(e.target.value)}
-            onKeyDown=${e => { if (e.key === 'Enter') login(adminKey); }}
-            placeholder="Admin secret key"
-            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 outline-none mb-4"
-          />
-          <button
-            onClick=${() => login(adminKey)}
-            class="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition"
-          >
-            Login
-          </button>
-        </div>
-      </div>
-      ${toast && html`<${Toast} ...${toast} onClose=${() => setToast(null)} />`}
-    `;
-  }
-
   const tabClass = (t) => `px-4 py-2 rounded-lg text-sm font-medium transition ${
     tab === t ? 'bg-purple-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
   }`;
@@ -502,12 +435,6 @@ export const AdminPanel = () => {
       <div class="flex gap-2 mb-6 items-center">
         <button onClick=${() => setTab('models')} class=${tabClass('models')}>Models</button>
         <button onClick=${() => setTab('calls')} class=${tabClass('calls')}>API Calls</button>
-        <button
-          onClick=${logout}
-          class="ml-auto px-4 py-2 rounded-lg text-sm font-medium text-red-600 bg-white hover:bg-red-50 transition"
-        >
-          Logout
-        </button>
       </div>
 
       ${tab === 'calls' ? html`<${CallsViewer} adminKey=${adminKey} />` : html`
@@ -515,7 +442,7 @@ export const AdminPanel = () => {
         <h2 class="text-2xl font-bold text-gray-800">Model Management</h2>
         <div class="flex gap-3">
           <button
-            onClick=${loadModels}
+            onClick=${() => loadModels()}
             class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition text-sm font-medium"
           >
             Refresh

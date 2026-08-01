@@ -20,8 +20,8 @@ const NavButton = ({ view, activeView, setActiveView, icon, label, desc }) => ht
   </a>
 `;
 
-export const Sidebar = ({ activeView, setActiveView }) => html`
-  <div class="w-64 bg-white h-screen fixed left-0 top-0 shadow-xl overflow-y-auto z-10">
+export const Sidebar = ({ activeView, setActiveView, onLogout }) => html`
+  <div class="w-64 bg-white h-screen fixed left-0 top-0 shadow-xl overflow-y-auto z-10 flex flex-col">
     <div class="p-6 border-b border-gray-200">
       <h1 class="text-xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
         🎨 ImageRouter
@@ -48,5 +48,17 @@ export const Sidebar = ({ activeView, setActiveView }) => html`
         <${NavButton} view="admin" activeView=${activeView} setActiveView=${setActiveView} icon="⚙️" label="Admin" desc="Manage models" />
       </div>
     </nav>
+
+    <div class="mt-auto p-4 border-t border-gray-200">
+      <button
+        onClick=${onLogout}
+        class="w-full text-left px-4 py-3 rounded-lg text-red-600 hover:bg-red-50 transition"
+      >
+        <div class="flex items-center">
+          <span class="text-lg mr-3">🔒</span>
+          <div class="font-semibold text-sm">Logout</div>
+        </div>
+      </button>
+    </div>
   </div>
 `;
