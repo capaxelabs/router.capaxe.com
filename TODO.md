@@ -203,6 +203,7 @@ This document tracks the migration to Hono/Cloudflare Workers, focusing exclusiv
 - [x] Add bulk import/export endpoints (`POST /admin/models/bulk`)
 - [x] Create simple web UI for model management (`public/admin.html`)
 - [x] Admin login with fixed secret key (`GET /admin/auth/verify`, persistent, logout)
+- [x] Entire dashboard behind admin-key login gate (app-level, logout in sidebar)
 - [x] Hash-based URL routing for sidebar navigation (`#/images`, `#/admin`, ...)
 
 ### 5.8 Documentation & Cleanup
