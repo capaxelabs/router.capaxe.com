@@ -346,39 +346,54 @@ export const AdminPanel = () => {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [checking, setChecking] = useState(!!localStorage.getItem('adminKey'));
   const [adminKey, setAdminKey] = useState(localStorage.getItem('adminKey') || '');
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
   const [filters, setFilters] = useState({ type: '', status: '', search: '' });
   const [tab, setTab] = useState('models');
 
-  const connect = async () => {
-    if (!adminKey) return;
-
-    localStorage.setItem('adminKey', adminKey);
+  const login = async (key, silent = false) => {
+    if (!key) return;
 
     try {
-      const res = await fetch('/admin/models/stats', {
-        headers: { 'Authorization': `Bearer ${adminKey}` }
+      const res = await fetch('/admin/auth/verify', {
+        headers: { 'Authorization': `Bearer ${key}` }
       });
-      const data = await res.json();
 
-      if (data.success) {
+      if (res.ok) {
+        localStorage.setItem('adminKey', key);
         setConnected(true);
-        loadModels();
+        loadModels(key);
       } else {
-        setToast({ message: 'Invalid admin key', type: 'error' });
+        localStorage.removeItem('adminKey');
+        if (!silent) setToast({ message: 'Invalid admin key', type: 'error' });
       }
     } catch (err) {
-      setToast({ message: 'Connection failed', type: 'error' });
+      if (!silent) setToast({ message: 'Connection failed', type: 'error' });
     }
+
+    setChecking(false);
   };
 
-  const loadModels = async () => {
+  // Auto-login with the saved key
+  useEffect(() => {
+    const saved = localStorage.getItem('adminKey');
+    if (saved) login(saved, true);
+  }, []);
+
+  const logout = () => {
+    localStorage.removeItem('adminKey');
+    setAdminKey('');
+    setConnected(false);
+    setModels([]);
+  };
+
+  const loadModels = async (key = adminKey) => {
     setLoading(true);
     try {
       const res = await fetch('/admin/models', {
-        headers: { 'Authorization': `Bearer ${adminKey}` }
+        headers: { 'Authorization': `Bearer ${key}` }
       });
       const data = await res.json();
       if (data.success) {
@@ -448,24 +463,29 @@ export const AdminPanel = () => {
     deprecated: 'bg-red-100 text-red-800'
   };
 
+  if (checking) {
+    return html`<div class="text-center py-24"><div class="spinner"></div></div>`;
+  }
+
   if (!connected) {
     return html`
       <div class="max-w-md mx-auto mt-12">
         <div class="bg-white rounded-xl shadow-lg p-8">
-          <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Admin Authentication</h2>
-          <p class="text-gray-600 text-sm text-center mb-6">Enter your admin API key to manage models</p>
+          <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Admin Login</h2>
+          <p class="text-gray-600 text-sm text-center mb-6">Enter the admin secret key. You stay logged in until you log out.</p>
           <input
             type="password"
             value=${adminKey}
             onInput=${e => setAdminKey(e.target.value)}
-            placeholder="Enter Admin API Key"
+            onKeyDown=${e => { if (e.key === 'Enter') login(adminKey); }}
+            placeholder="Admin secret key"
             class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-purple-500 outline-none mb-4"
           />
           <button
-            onClick=${connect}
+            onClick=${() => login(adminKey)}
             class="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition"
           >
-            Connect
+            Login
           </button>
         </div>
       </div>
@@ -479,9 +499,15 @@ export const AdminPanel = () => {
 
   return html`
     <div>
-      <div class="flex gap-2 mb-6">
+      <div class="flex gap-2 mb-6 items-center">
         <button onClick=${() => setTab('models')} class=${tabClass('models')}>Models</button>
         <button onClick=${() => setTab('calls')} class=${tabClass('calls')}>API Calls</button>
+        <button
+          onClick=${logout}
+          class="ml-auto px-4 py-2 rounded-lg text-sm font-medium text-red-600 bg-white hover:bg-red-50 transition"
+        >
+          Logout
+        </button>
       </div>
 
       ${tab === 'calls' ? html`<${CallsViewer} adminKey=${adminKey} />` : html`

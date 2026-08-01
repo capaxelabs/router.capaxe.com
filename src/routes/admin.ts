@@ -7,6 +7,10 @@ import { apiUsage } from '../db/schema'
 const admin = new Hono<{ Bindings: CloudflareBindings; Variables: ContextVariables }>()
 
 admin.use('/calls', adminAuthWithRateLimit)
+admin.use('/auth/verify', adminAuthWithRateLimit)
+
+// GET /admin/auth/verify - validates the admin key (middleware rejects bad keys)
+admin.get('/auth/verify', (c) => c.json({ success: true }))
 
 /**
  * GET /admin/calls - recent API calls with stored request/response metadata.

@@ -1,9 +1,10 @@
 import { html } from './shared.js';
 
 const NavButton = ({ view, activeView, setActiveView, icon, label, desc }) => html`
-  <button
+  <a
+    href="#/${view}"
     onClick=${() => setActiveView(view)}
-    class="w-full text-left px-4 py-3 rounded-lg mb-2 transition ${
+    class="block w-full text-left px-4 py-3 rounded-lg mb-2 transition ${
       activeView === view
         ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
         : 'text-gray-700 hover:bg-gray-100'
@@ -16,7 +17,7 @@ const NavButton = ({ view, activeView, setActiveView, icon, label, desc }) => ht
         <div class="text-xs opacity-75">${desc}</div>
       </div>
     </div>
-  </button>
+  </a>
 `;
 
 export const Sidebar = ({ activeView, setActiveView }) => html`
