@@ -521,3 +521,19 @@ Supersedes the "Cloudflare AI Gateway (2026-07-30)" section above: direct provid
 - [ ] Old Turso database still exists untouched - decommission after confirming D1 in production
 - [ ] Legacy scripts still point at Turso and are obsolete: `src/db/seed.ts`, `drizzle/seed-replicate-models.ts`, `seed-gemini-image-models.ts`, `seed-new-image-models.ts`, `seed-photomaker.ts` (+ their npm scripts) - delete
 - [ ] `db:studio`/`db:migrate` need `CLOUDFLARE_D1_TOKEN` (API token with D1 edit) in `.env`
+
+---
+
+## Embeddings Endpoint (2026-08-02)
+
+### Features
+- [x] `POST /v1/embeddings` - OpenAI-compatible embeddings on Workers AI BGE models (`src/routes/embeddings.ts`, mounted in `src/index.ts`)
+  - [x] Accepts `input` as string or array (max 100 per request); returns `data[{object,index,embedding}]` ordered by index
+  - [x] Same auth (`validateApiKey`) and `api_usage` logging as chat; parses both binding (`{shape,data}`) and REST (`{result:{...}}`) shapes
+  - [x] `GET /v1/embeddings/models` - static list of BGE models (bge-base/small/large-en-v1.5, bge-m3); embeddings are not in the `models` table
+  - [x] Verified locally against real Workers AI: 768-dim vectors, correct ordering, semantic sanity check passed
+- [x] Documented in `docs/API.md`
+
+### Follow-ups
+- [ ] Deploy to production (`wrangler deploy`) - endpoint is code-complete but NOT yet live on router.capaxe.com
+- [ ] Workers AI returns no `neurons` for embedding models, so calls log `cost = 0`; revisit if embedding volume grows

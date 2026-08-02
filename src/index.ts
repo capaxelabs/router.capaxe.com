@@ -54,6 +54,7 @@ import playgroundRoutes from './routes/playground'
 import taskRoutes from './routes/tasks'
 import tasksPage from './routes/tasksPage'
 import chatRoutes from './routes/chat'
+import embeddingsRoutes from './routes/embeddings'
 
 // Models listing endpoint
 app.route('/v1/models', modelsRoutes)
@@ -78,6 +79,9 @@ app.route('/v1/tasks', taskRoutes)
 
 // Chat completions routes (OpenAI-compatible for Vercel AI SDK)
 app.route('/v1/chat', chatRoutes)
+
+// Embeddings routes (OpenAI-compatible, Workers AI BGE models)
+app.route('/v1/embeddings', embeddingsRoutes)
 
 // Tasks web page for viewing all tasks
 app.route('/tasks', tasksPage)

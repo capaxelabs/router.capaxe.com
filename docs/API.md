@@ -24,6 +24,8 @@ Authorization: Bearer YOUR_API_KEY
 | GET | `/v1/models` | List all models (image, video, text) |
 | GET | `/v1/chat/models` | List text models (OpenAI format) |
 | POST | `/v1/chat/completions` | Chat completion (OpenAI-compatible) |
+| GET | `/v1/embeddings/models` | List embedding models |
+| POST | `/v1/embeddings` | Create embeddings (OpenAI-compatible) |
 | POST | `/v1/images/generations` | Create image generation task |
 | POST | `/v1/images/edits` | Create image edit task (with input images) |
 | POST | `/v1/videos/generations` | Create video generation task |
@@ -83,6 +85,56 @@ Optional fields: `max_tokens`, `temperature`, `top_p`, `stream: true` (SSE strea
 `usage.cost` is the dollar cost of the call. `cost_source` is `neurons` (exact, Workers AI models) or `estimated_tokens` (estimated from the model's per-1M-token price).
 
 When streaming, the final chunk before `[DONE]` carries the same `usage` object.
+
+## Embeddings
+
+Turns text into vectors for semantic similarity, search, and recommendations. Synchronous and OpenAI-compatible, so the OpenAI SDK works by changing the base URL. Runs Workers AI BGE models.
+
+### Request
+
+```bash
+curl https://router.capaxe.com/v1/embeddings \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "@cf/baai/bge-base-en-v1.5",
+    "input": ["Floral summer midi dress", "Heavy duty steel hammer"]
+  }'
+```
+
+`input` is a string or an array of strings, max 100 per request. Split larger sets into batches.
+
+### Response
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "embedding", "index": 0, "embedding": [0.021, -0.318, "..."] },
+    { "object": "embedding", "index": 1, "embedding": [0.114, 0.052, "..."] }
+  ],
+  "model": "@cf/baai/bge-base-en-v1.5",
+  "usage": { "prompt_tokens": 18, "total_tokens": 18 }
+}
+```
+
+Vectors come back in `data`, one per input — order by `index`, not array position. Workers AI does not report neurons for embedding models, so `usage` carries token counts only and no `cost` field.
+
+### Models
+
+```bash
+curl https://router.capaxe.com/v1/embeddings/models \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+| Model | Dimensions | Notes |
+|-------|-----------|-------|
+| `@cf/baai/bge-base-en-v1.5` | 768 | Balanced quality and speed (default choice) |
+| `@cf/baai/bge-small-en-v1.5` | 384 | Fastest, smallest vectors |
+| `@cf/baai/bge-large-en-v1.5` | 1024 | Highest quality |
+| `@cf/baai/bge-m3` | 1024 | Multilingual |
+
+Vectors from different models are not comparable — re-embed everything when switching.
 
 ## Image generation
 
