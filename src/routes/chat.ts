@@ -24,6 +24,7 @@ interface ChatCompletionRequest {
   top_p?: number
   stop?: string | string[]
   stream?: boolean
+  response_format?: { type: string; json_schema?: any }
 }
 
 // Workers AI bills @cf/ models in neurons: $0.011 per 1,000 neurons
@@ -185,6 +186,8 @@ chat.post('/completions', async (c) => {
   if (body.max_tokens !== undefined) inputs.max_tokens = body.max_tokens
   if (body.temperature !== undefined) inputs.temperature = body.temperature
   if (body.top_p !== undefined) inputs.top_p = body.top_p
+  // Structured output: { type: 'json_object' } or { type: 'json_schema', json_schema: {...} }
+  if (body.response_format !== undefined) inputs.response_format = body.response_format
 
   try {
     if (stream) {
